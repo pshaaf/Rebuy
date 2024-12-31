@@ -6,6 +6,28 @@ struct Constants {
     static let cardRed = Color(red: 0.698, green: 0.132, blue: 0.132)
 }
 
+// Keyboard toolbar view
+struct KeyboardToolbar: ToolbarContent {
+    let action: () -> Void
+    
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .keyboard) {
+            Spacer()
+            Button("Done") {
+                action()
+            }
+        }
+    }
+}
+
+// Extension to hide keyboard
+extension View {
+    func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                      to: nil, from: nil, for: nil)
+    }
+}
+
 struct Checkbox: View {
     @Binding var isChecked: Bool
     
@@ -100,11 +122,11 @@ class PokerGameViewModel: ObservableObject {
 
 struct ContentView: View {
     @StateObject private var viewModel = PokerGameViewModel()
+    @FocusState private var isTextFieldFocused: Bool
     
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                
                 // Title and subtitle
                 VStack(spacing: 4) {
                     Text("Rebuy")
@@ -124,8 +146,10 @@ struct ContentView: View {
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .keyboardType(.numberPad)
                         .frame(width: 80)
+                        .focused($isTextFieldFocused)
                     
                     Button("Populate") {
+                        hideKeyboard()
                         viewModel.populateAmounts()
                     }
                     .foregroundColor(.white)
@@ -152,34 +176,28 @@ struct ContentView: View {
                 .padding(.bottom, 20)
                 
                 // The combined table
-                // Outer ScrollView: vertical scrolling
                 ScrollView(.vertical, showsIndicators: true) {
-                    
-                    // HStack: pinned "Player" column on left + horizontally scrollable columns on right
                     HStack(spacing: 0) {
-                        
                         // LEFT (Pinned) COLUMN
                         VStack(spacing: 0) {
-                            // Header for "Player"
                             Text("Player")
                                 .font(.headline)
                                 .frame(width: 100, alignment: .leading)
                                 .padding(.vertical, 8)
                             
-                            // Data rows for "Player"
                             ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, _ in
                                 TextField("Name", text: $viewModel.players[index].name)
                                     .textFieldStyle(RoundedBorderTextFieldStyle())
                                     .frame(width: 100, alignment: .leading)
                                     .padding(.vertical, 8)
+                                    .focused($isTextFieldFocused)
                             }
                         }
                         
-                        // RIGHT (Horizontally scrollable) columns
+                        // RIGHT columns
                         ScrollView(.horizontal, showsIndicators: true) {
                             VStack(spacing: 0) {
-                                
-                                // HEADER row for the other columns
+                                // Headers
                                 HStack(spacing: 0) {
                                     Text("Amount")
                                         .font(.headline)
@@ -193,43 +211,37 @@ struct ContentView: View {
                                     Text("P/L")
                                         .font(.headline)
                                         .frame(width: 80, alignment: .leading)
-                                    
-                                    // Trash column header (could label "Del" if you want)
                                     Text("")
                                         .font(.headline)
                                         .frame(width: 40, alignment: .center)
                                 }
                                 .padding(.vertical, 8)
                                 
-                                // DATA rows for the other columns
                                 ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, p in
                                     HStack(spacing: 0) {
-                                        // Amount
                                         TextField("Amount", value: $viewModel.players[index].amount,
-                                                  format: .currency(code: "USD"))
+                                                format: .currency(code: "USD"))
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
                                             .keyboardType(.decimalPad)
                                             .frame(width: 80)
+                                            .focused($isTextFieldFocused)
                                         
-                                        // Venmo
                                         Checkbox(isChecked: $viewModel.players[index].venmoStatus)
                                             .frame(width: 60)
                                         
-                                        // Chips
                                         TextField("Chips", value: $viewModel.players[index].chipCount,
-                                                  format: .currency(code: "USD"))
+                                                format: .currency(code: "USD"))
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
                                             .keyboardType(.decimalPad)
                                             .frame(width: 80)
+                                            .focused($isTextFieldFocused)
                                         
-                                        // P/L
                                         let profitLoss = viewModel.players[index].chipCount
                                             - viewModel.players[index].amount
                                         Text(profitLoss.formatted(.currency(code: "USD")))
                                             .frame(width: 80, alignment: .leading)
                                             .foregroundColor(profitLoss >= 0 ? .green : .red)
                                         
-                                        // Trash button
                                         Button {
                                             viewModel.removePlayer(p)
                                         } label: {
@@ -286,6 +298,10 @@ struct ContentView: View {
                 .padding()
             }
             .navigationBarHidden(true)
+            .toolbar { KeyboardToolbar(action: { isTextFieldFocused = false }) }
+            .onTapGesture {
+                hideKeyboard()
+            }
         }
     }
 }
