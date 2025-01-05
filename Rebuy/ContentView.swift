@@ -52,6 +52,9 @@ struct Player: Identifiable, Equatable {
 class PokerGameViewModel: ObservableObject {
     @Published var players: [Player]
     @Published var buyInText: String = ""
+    @Published var showingEndGameAlert = false
+    @Published var gameLogs: [GameLog] = []
+    @Published var shouldShowLogs = false
     
     init() {
         self.players = [
@@ -60,6 +63,12 @@ class PokerGameViewModel: ObservableObject {
             Player(name: "Player 3", amount: 0, venmoStatus: false, chipCount: 0),
             Player(name: "Player 4", amount: 0, venmoStatus: false, chipCount: 0)
         ]
+        
+        // Load saved game logs
+        if let savedLogs = UserDefaults.standard.data(forKey: "GameLogs"),
+           let decodedLogs = try? JSONDecoder().decode([GameLog].self, from: savedLogs) {
+            self.gameLogs = decodedLogs
+        }
     }
     
     var totalInPlay: Double {
@@ -68,6 +77,56 @@ class PokerGameViewModel: ObservableObject {
     
     var totalChipCount: Double {
         players.reduce(0) { $0 + $1.chipCount }
+    }
+    
+    // Function to update player names in game logs
+    func updatePlayerName(in gameLog: GameLog, player: PlayerResult, newName: String) {
+        if let gameIndex = gameLogs.firstIndex(where: { $0.id == gameLog.id }),
+           let playerIndex = gameLogs[gameIndex].players.firstIndex(where: { $0.id == player.id }) {
+            // Create a new array of players with the updated name
+            var updatedPlayers = gameLogs[gameIndex].players
+            updatedPlayers[playerIndex].name = newName
+            
+            // Create a new GameLog with the updated players
+            let updatedLog = GameLog(
+                id: gameLog.id,
+                endDate: gameLog.endDate,
+                duration: gameLog.duration,
+                location: gameLog.location,
+                players: updatedPlayers,
+                totalBuyIn: gameLog.totalBuyIn,
+                totalChipCount: gameLog.totalChipCount
+            )
+            
+            // Update the gameLogs array
+            gameLogs[gameIndex] = updatedLog
+            saveGameLogs()
+        }
+    }
+    
+    // Function to create a game log
+    private func createGameLog() -> GameLog {
+        let playerResults = players.map { player in
+            PlayerResult(
+                name: player.name,
+                buyIn: player.amount,
+                finalChipCount: player.chipCount,
+                venmoStatus: player.venmoStatus
+            )
+        }
+        
+        return GameLog(
+            players: playerResults,
+            totalBuyIn: totalInPlay,
+            totalChipCount: totalChipCount
+        )
+    }
+    
+    // Function to save game logs
+    private func saveGameLogs() {
+        if let encoded = try? JSONEncoder().encode(gameLogs) {
+            UserDefaults.standard.set(encoded, forKey: "GameLogs")
+        }
     }
     
     func populateAmounts() {
@@ -89,6 +148,14 @@ class PokerGameViewModel: ObservableObject {
             chipCount: 0
         )
         players.append(newPlayer)
+    }
+    
+    func endAndSaveGame() {
+        let newLog = createGameLog()
+        gameLogs.append(newLog)
+        saveGameLogs()
+        resetGame()
+        shouldShowLogs = true
     }
     
     func resetGame() {
@@ -274,6 +341,15 @@ struct ContentView: View {
                         Spacer()
                         
                         Button(action: {
+                            viewModel.showingEndGameAlert = true
+                        }) {
+                            Text("End & Save")
+                                .foregroundColor(.blue)
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: {
                             viewModel.resetGame()
                         }) {
                             Text("Reset Game")
@@ -297,10 +373,26 @@ struct ContentView: View {
                 }
                 .padding()
             }
-            .navigationBarHidden(true)
+            .navigationBarItems(trailing:
+                NavigationLink(
+                    destination: LogsView(viewModel: viewModel),
+                    isActive: $viewModel.shouldShowLogs
+                ) {
+                    Image(systemName: "list.bullet")
+                        .foregroundColor(.blue)
+                }
+            )
             .toolbar { KeyboardToolbar(action: { isTextFieldFocused = false }) }
             .onTapGesture {
                 hideKeyboard()
+            }
+            .alert("Are you sure?", isPresented: $viewModel.showingEndGameAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("End & Save", role: .destructive) {
+                    viewModel.endAndSaveGame()
+                }
+            } message: {
+                Text("Game will reset and saved to Logs")
             }
         }
     }
