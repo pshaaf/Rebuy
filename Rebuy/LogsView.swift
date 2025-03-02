@@ -2,6 +2,8 @@ import SwiftUI
 
 struct LogsView: View {
     @ObservedObject var viewModel: PokerGameViewModel
+    @State private var selectedPlayer: PlayerResult?
+    @State private var isShowingPlayerStats = false
     
     // Computed property to sort logs by date
     private var sortedLogs: [GameLog] {
@@ -22,17 +24,25 @@ struct LogsView: View {
                     
                     // Player results
                     ForEach(log.players) { player in
-                        NavigationLink(destination: PlayerStatsView(playerStats: viewModel.getPlayerStats(for: player))) {
-                            HStack {
-                                Text(player.name)
-                                
-                                Spacer()
-                                let profitLoss = player.finalChipCount - player.buyIn
-                                Text(profitLoss.formatted(.currency(code: "USD")))
-                                    .foregroundColor(profitLoss >= 0 ? .green : .red)
+                        Button(action: {
+                            self.selectedPlayer = player
+                            self.isShowingPlayerStats = true
+                        }) {
+                            VStack(alignment: .leading) {
+                                HStack {
+                                    Text(player.name)
+                                        .foregroundColor(.blue)
+                                        .underline()
+                                    
+                                    Spacer()
+                                    let profitLoss = player.finalChipCount - player.buyIn
+                                    Text(profitLoss.formatted(.currency(code: "USD")))
+                                        .foregroundColor(profitLoss >= 0 ? .green : .red)
+                                }
+                                .font(.subheadline)
                             }
-                            .font(.subheadline)
                         }
+                        .buttonStyle(PlainButtonStyle())
                     }
                     
                     // Game balance indicator
@@ -51,6 +61,19 @@ struct LogsView: View {
         .navigationTitle("Game History")
         .toolbar {
             EditButton()
+        }
+        .background(
+            NavigationLink(
+                destination: selectedPlayer.map { PlayerStatsView(playerStats: viewModel.getPlayerStats(for: $0)) },
+                isActive: $isShowingPlayerStats,
+                label: { EmptyView() }
+            )
+            .hidden()
+        )
+        .onDisappear {
+            // Reset selection state when view disappears
+            selectedPlayer = nil
+            isShowingPlayerStats = false
         }
     }
     
