@@ -30,7 +30,7 @@ struct GameLog: Identifiable, Codable {
 
 struct PlayerResult: Identifiable, Codable {
     let id: UUID
-    var name: String  // Changed to var to allow editing
+    var name: String
     let buyIn: Double
     let finalChipCount: Double
     let venmoStatus: Bool

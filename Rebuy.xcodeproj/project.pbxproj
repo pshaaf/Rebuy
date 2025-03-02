@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		5B0BBF022D2B1C9C00DB6F18 /* GameLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0BBF012D2B1C9C00DB6F18 /* GameLog.swift */; };
 		5B0BBF042D2B1EA000DB6F18 /* LogsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0BBF032D2B1EA000DB6F18 /* LogsView.swift */; };
+		5B65F3B72D73FF000026CA48 /* PlayerStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B65F3B62D73FEFF0026CA48 /* PlayerStatsView.swift */; };
 		5B8756CE2D226A4200283CCC /* RebuyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8756CD2D226A4200283CCC /* RebuyApp.swift */; };
 		5B8756D02D226A4200283CCC /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B8756CF2D226A4200283CCC /* ContentView.swift */; };
 		5B8756D22D226A4A00283CCC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5B8756D12D226A4A00283CCC /* Assets.xcassets */; };
@@ -18,6 +19,7 @@
 /* Begin PBXFileReference section */
 		5B0BBF012D2B1C9C00DB6F18 /* GameLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLog.swift; sourceTree = "<group>"; };
 		5B0BBF032D2B1EA000DB6F18 /* LogsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsView.swift; sourceTree = "<group>"; };
+		5B65F3B62D73FEFF0026CA48 /* PlayerStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerStatsView.swift; sourceTree = "<group>"; };
 		5B8756CA2D226A4200283CCC /* Rebuy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Rebuy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5B8756CD2D226A4200283CCC /* RebuyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RebuyApp.swift; sourceTree = "<group>"; };
 		5B8756CF2D226A4200283CCC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -59,6 +61,7 @@
 				5B8756CF2D226A4200283CCC /* ContentView.swift */,
 				5B0BBF012D2B1C9C00DB6F18 /* GameLog.swift */,
 				5B0BBF032D2B1EA000DB6F18 /* LogsView.swift */,
+				5B65F3B62D73FEFF0026CA48 /* PlayerStatsView.swift */,
 				5B8756D12D226A4A00283CCC /* Assets.xcassets */,
 				5B8756D32D226A4A00283CCC /* Preview Content */,
 			);
@@ -147,6 +150,7 @@
 				5B0BBF042D2B1EA000DB6F18 /* LogsView.swift in Sources */,
 				5B0BBF022D2B1C9C00DB6F18 /* GameLog.swift in Sources */,
 				5B8756CE2D226A4200283CCC /* RebuyApp.swift in Sources */,
+				5B65F3B72D73FF000026CA48 /* PlayerStatsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,7 +290,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paulshaaf.Rebuy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -314,7 +318,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paulshaaf.Rebuy;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

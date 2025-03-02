@@ -79,7 +79,7 @@ class PokerGameViewModel: ObservableObject {
         players.reduce(0) { $0 + $1.chipCount }
     }
     
-    // Function to update player names in game logs
+    // Function to update player name in game logs
     func updatePlayerName(in gameLog: GameLog, player: PlayerResult, newName: String) {
         if let gameIndex = gameLogs.firstIndex(where: { $0.id == gameLog.id }),
            let playerIndex = gameLogs[gameIndex].players.firstIndex(where: { $0.id == player.id }) {
@@ -174,14 +174,88 @@ class PokerGameViewModel: ObservableObject {
         }
     }
     
-    func openVenmo() {
-        if let url = URL(string: "venmo://") {
-            if UIApplication.shared.canOpenURL(url) {
-                UIApplication.shared.open(url, options: [:], completionHandler: nil)
-            } else {
-                if let appStoreURL = URL(string: "https://apps.apple.com/us/app/venmo/id351727428") {
-                    UIApplication.shared.open(appStoreURL, options: [:], completionHandler: nil)
+    // Function to get stats for a specific player
+    func getPlayerStats(for player: PlayerResult) -> PlayerStats {
+        let playerName = player.name
+        let playerId = player.id
+        
+        // Find all games this player participated in
+        let relevantGames = gameLogs.filter { gameLog in
+            gameLog.players.contains { $0.id == playerId || $0.name == playerName }
+        }
+        
+        // Get all results for this player
+        let playerResults = relevantGames.compactMap { gameLog in
+            gameLog.players.first { $0.id == playerId || $0.name == playerName }
+        }
+        
+        return PlayerStats(
+            name: playerName,
+            games: relevantGames,
+            playerResults: playerResults
+        )
+    }
+    
+    func getUniquePlayerNames() -> [String] {
+        // Extract all player names from logs
+        let allNames = gameLogs.flatMap { $0.players.map { $0.name } }
+        
+        // Create a unique set and sort alphabetically
+        return Array(Set(allNames)).sorted()
+    }
+}
+
+// Create a new component for player name input with suggestions
+struct PlayerNameInput: View {
+    @Binding var name: String
+    @ObservedObject var viewModel: PokerGameViewModel
+    @State private var showSuggestions = false
+    @FocusState private var isFocused: Bool
+    
+    var filteredSuggestions: [String] {
+        if name.isEmpty {
+            return []
+        }
+        
+        return viewModel.getUniquePlayerNames().filter {
+            $0.lowercased().contains(name.lowercased()) && $0.lowercased() != name.lowercased()
+        }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TextField("Name", text: $name)
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .focused($isFocused)
+                .onChange(of: name) { _ in
+                    showSuggestions = !name.isEmpty && filteredSuggestions.count > 0
                 }
+                .onTapGesture {
+                    showSuggestions = !name.isEmpty && filteredSuggestions.count > 0
+                }
+            
+            if showSuggestions && isFocused {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(filteredSuggestions, id: \.self) { suggestion in
+                            Text(suggestion)
+                                .padding(.vertical, 5)
+                                .padding(.horizontal, 10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    name = suggestion
+                                    showSuggestions = false
+                                    isFocused = false
+                                }
+                        }
+                    }
+                }
+                .frame(height: min(CGFloat(filteredSuggestions.count * 35), 150))
+                .background(Color(.systemBackground))
+                .cornerRadius(8)
+                .shadow(radius: 2)
+                .zIndex(1) // Ensure suggestions appear above other content
             }
         }
     }
@@ -239,6 +313,16 @@ struct ContentView: View {
                             .font(.headline)
                             .foregroundColor(viewModel.totalChipCount == viewModel.totalInPlay ? .green : .red)
                     }
+                    
+                    // New difference line
+                    HStack(spacing: 0) {
+                        Text("Difference: ")
+                            .font(.headline)
+                        let difference = viewModel.totalChipCount - viewModel.totalInPlay
+                        Text("$\(difference, specifier: "%.2f")")
+                            .font(.headline)
+                            .foregroundColor(difference == 0 ? .green : .red)
+                    }
                 }
                 .padding(.bottom, 20)
                 
@@ -253,11 +337,9 @@ struct ContentView: View {
                                 .padding(.vertical, 8)
                             
                             ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, _ in
-                                TextField("Name", text: $viewModel.players[index].name)
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                PlayerNameInput(name: $viewModel.players[index].name, viewModel: viewModel)
                                     .frame(width: 100, alignment: .leading)
                                     .padding(.vertical, 8)
-                                    .focused($isTextFieldFocused)
                             }
                         }
                         
@@ -269,7 +351,7 @@ struct ContentView: View {
                                     Text("Amount")
                                         .font(.headline)
                                         .frame(width: 80, alignment: .leading)
-                                    Text("Venmo")
+                                    Text("Paid?")
                                         .font(.headline)
                                         .frame(width: 60, alignment: .center)
                                     Text("Chips")
@@ -356,20 +438,6 @@ struct ContentView: View {
                                 .foregroundColor(.red)
                         }
                     }
-                    
-                    Button(action: {
-                        viewModel.openVenmo()
-                    }) {
-                        HStack {
-                            Image(systemName: "dollarsign.circle.fill")
-                            Text("Go to Venmo")
-                        }
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Constants.venmoBlue)
-                        .cornerRadius(10)
-                    }
                 }
                 .padding()
             }
@@ -392,7 +460,7 @@ struct ContentView: View {
                     viewModel.endAndSaveGame()
                 }
             } message: {
-                Text("Game will reset and saved to Logs")
+                Text("Game will reset and save to Logs")
             }
         }
     }

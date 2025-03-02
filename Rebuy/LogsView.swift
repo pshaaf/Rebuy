@@ -2,8 +2,6 @@ import SwiftUI
 
 struct LogsView: View {
     @ObservedObject var viewModel: PokerGameViewModel
-    @State private var editingPlayer: (gameLog: GameLog, player: PlayerResult)? = nil
-    @State private var newName: String = ""
     
     // Computed property to sort logs by date
     private var sortedLogs: [GameLog] {
@@ -12,7 +10,7 @@ struct LogsView: View {
     
     var body: some View {
         List {
-            ForEach(sortedLogs) { log in  // Changed from viewModel.gameLogs to sortedLogs
+            ForEach(sortedLogs) { log in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text(log.formattedDate)
@@ -24,24 +22,17 @@ struct LogsView: View {
                     
                     // Player results
                     ForEach(log.players) { player in
-                        HStack {
+                        NavigationLink(destination: PlayerStatsView(playerStats: viewModel.getPlayerStats(for: player))) {
                             HStack {
                                 Text(player.name)
-                                Image(systemName: "pencil")
-                                    .font(.caption)
-                                    .foregroundColor(.blue)
+                                
+                                Spacer()
+                                let profitLoss = player.finalChipCount - player.buyIn
+                                Text(profitLoss.formatted(.currency(code: "USD")))
+                                    .foregroundColor(profitLoss >= 0 ? .green : .red)
                             }
-                            .onTapGesture {
-                                editingPlayer = (log, player)
-                                newName = player.name
-                            }
-                            
-                            Spacer()
-                            let profitLoss = player.finalChipCount - player.buyIn
-                            Text(profitLoss.formatted(.currency(code: "USD")))
-                                .foregroundColor(profitLoss >= 0 ? .green : .red)
+                            .font(.subheadline)
                         }
-                        .font(.subheadline)
                     }
                     
                     // Game balance indicator
@@ -60,23 +51,6 @@ struct LogsView: View {
         .navigationTitle("Game History")
         .toolbar {
             EditButton()
-        }
-        .alert("Edit Player Name", isPresented: .init(
-            get: { editingPlayer != nil },
-            set: { if !$0 { editingPlayer = nil } }
-        )) {
-            TextField("Name", text: $newName)
-            Button("Cancel", role: .cancel) {
-                editingPlayer = nil
-            }
-            Button("Save") {
-                if let (gameLog, player) = editingPlayer {
-                    viewModel.updatePlayerName(in: gameLog, player: player, newName: newName)
-                }
-                editingPlayer = nil
-            }
-        } message: {
-            Text("Enter new name for player")
         }
     }
     
