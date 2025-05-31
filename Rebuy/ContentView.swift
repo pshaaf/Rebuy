@@ -204,38 +204,110 @@ class PokerGameViewModel: ObservableObject {
     }
 }
 
+// Create a new component for amount input with placeholder behavior
+struct AmountInput: View {
+    @Binding var amount: Double
+    @FocusState.Binding var focused: Bool
+    @State private var displayText = ""
+    
+    var isDefaultAmount: Bool {
+        return amount == 0
+    }
+    
+    var body: some View {
+        TextField(isDefaultAmount ? "$0.00" : "Amount", text: $displayText)
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+            .keyboardType(.decimalPad)
+            .frame(width: 80)
+            .foregroundColor(isDefaultAmount && !focused ? .gray : .primary)
+            .onAppear {
+                displayText = isDefaultAmount ? "" : String(format: "%.2f", amount)
+            }
+            .onChange(of: focused) { isFocused in
+                if isFocused {
+                    // If focusing and it's a default amount, clear the display
+                    if isDefaultAmount {
+                        displayText = ""
+                    }
+                } else {
+                    // If losing focus, save the entered amount
+                    if let newAmount = Double(displayText) {
+                        amount = newAmount
+                    } else if displayText.isEmpty {
+                        // If empty, reset to 0
+                        amount = 0
+                        displayText = ""
+                    }
+                }
+            }
+            .onChange(of: displayText) { newValue in
+                if focused && !newValue.isEmpty {
+                    if let newAmount = Double(newValue) {
+                        amount = newAmount
+                    }
+                }
+            }
+            .focused($focused)
+    }
+}
+
 // Create a new component for player name input with suggestions
 struct PlayerNameInput: View {
     @Binding var name: String
     @ObservedObject var viewModel: PokerGameViewModel
     @State private var showSuggestions = false
+    @State private var displayText = ""
     @FocusState private var isFocused: Bool
     var onFocus: (() -> Void)? = nil
     
+    var isDefaultName: Bool {
+        return name.hasPrefix("Player ") && name.count <= 8 // "Player X" format
+    }
+    
     var filteredSuggestions: [String] {
-        if name.isEmpty {
+        if displayText.isEmpty {
             return []
         }
         
         return viewModel.getUniquePlayerNames().filter {
-            $0.lowercased().contains(name.lowercased()) && $0.lowercased() != name.lowercased()
+            $0.lowercased().contains(displayText.lowercased()) && $0.lowercased() != displayText.lowercased()
         }
     }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TextField("Name", text: $name)
+            TextField(isDefaultName ? name : "Name", text: $displayText)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .focused($isFocused)
+                .foregroundColor(isDefaultName && !isFocused ? .gray : .primary)
+                .onAppear {
+                    displayText = isDefaultName ? "" : name
+                }
                 .onChange(of: isFocused) { focused in
-                    if focused, let onFocus = onFocus {
-                        onFocus()
+                    if focused {
+                        if let onFocus = onFocus {
+                            onFocus()
+                        }
+                        // If focusing and it's a default name, clear the display
+                        if isDefaultName {
+                            displayText = ""
+                        }
+                    } else {
+                        // If losing focus and display is empty, restore default name
+                        if displayText.isEmpty && isDefaultName {
+                            displayText = ""
+                        } else if !displayText.isEmpty {
+                            name = displayText
+                        }
                     }
                     
-                    showSuggestions = focused && !name.isEmpty && filteredSuggestions.count > 0
+                    showSuggestions = focused && !displayText.isEmpty && filteredSuggestions.count > 0
                 }
-                .onChange(of: name) { _ in
-                    showSuggestions = isFocused && !name.isEmpty && filteredSuggestions.count > 0
+                .onChange(of: displayText) { newValue in
+                    if isFocused && !newValue.isEmpty {
+                        name = newValue
+                    }
+                    showSuggestions = isFocused && !newValue.isEmpty && filteredSuggestions.count > 0
                 }
             
             if showSuggestions && isFocused {
@@ -248,6 +320,7 @@ struct PlayerNameInput: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
+                                    displayText = suggestion
                                     name = suggestion
                                     showSuggestions = false
                                     isFocused = false
@@ -267,7 +340,8 @@ struct PlayerNameInput: View {
 
 struct ContentView: View {
     @StateObject private var viewModel = PokerGameViewModel()
-    @FocusState private var isTextFieldFocused: Bool
+    @FocusState private var buyInFocused: Bool
+    @FocusState private var tableFocused: Bool
     @State private var keyboardVisible = false
     @State private var editingPlayerIndex: Int? = nil
     
@@ -292,9 +366,11 @@ struct ContentView: View {
                                 .textFieldStyle(RoundedBorderTextFieldStyle())
                                 .keyboardType(.numberPad)
                                 .frame(width: 80)
-                                .focused($isTextFieldFocused)
+                                .focused($buyInFocused)
                             
                             Button("Populate") {
+                                buyInFocused = false
+                                tableFocused = false
                                 hideKeyboard()
                                 viewModel.populateAmounts()
                             }
@@ -337,11 +413,6 @@ struct ContentView: View {
                                 .font(.headline)
                                 .foregroundColor(Constants.cardRed)
                             Spacer()
-                            Button("Done") {
-                                isTextFieldFocused = false
-                                editingPlayerIndex = nil
-                            }
-                            .foregroundColor(.blue)
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 8)
@@ -401,12 +472,7 @@ struct ContentView: View {
                                     
                                     ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, p in
                                         HStack(spacing: 0) {
-                                            TextField("Amount", value: $viewModel.players[index].amount,
-                                                    format: .currency(code: "USD"))
-                                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                                .keyboardType(.decimalPad)
-                                                .frame(width: 80)
-                                                .focused($isTextFieldFocused)
+                                            AmountInput(amount: $viewModel.players[index].amount, focused: $tableFocused)
                                             
                                             Checkbox(isChecked: $viewModel.players[index].venmoStatus)
                                                 .frame(width: 60)
@@ -416,7 +482,7 @@ struct ContentView: View {
                                                 .textFieldStyle(RoundedBorderTextFieldStyle())
                                                 .keyboardType(.decimalPad)
                                                 .frame(width: 80)
-                                                .focused($isTextFieldFocused)
+                                                .focused($tableFocused)
                                             
                                             let profitLoss = viewModel.players[index].chipCount
                                                 - viewModel.players[index].amount
@@ -486,8 +552,12 @@ struct ContentView: View {
                         .foregroundColor(.blue)
                 }
             )
+            .contentShape(Rectangle())
             .onTapGesture {
-                hideKeyboard()
+                // Only hide keyboard if not tapping on input fields
+                if !buyInFocused && !tableFocused {
+                    hideKeyboard()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
                 keyboardVisible = true
