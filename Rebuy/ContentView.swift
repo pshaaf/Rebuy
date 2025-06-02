@@ -204,14 +204,52 @@ class PokerGameViewModel: ObservableObject {
     }
 }
 
+// Create a simple buy-in input component with its own focus state
+struct BuyInInput: View {
+    @Binding var text: String
+    
+    @FocusState private var isFocused: Bool
+    
+    var body: some View {
+        TextField("0", text: $text)
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+            .keyboardType(.numberPad)
+            .frame(width: 80)
+            .focused($isFocused)
+    }
+}
+
 // Create a new component for amount input with placeholder behavior
 struct AmountInput: View {
     @Binding var amount: Double
-    @FocusState.Binding var focused: Bool
     @State private var displayText = ""
+    @FocusState private var isFocused: Bool
     
     var isDefaultAmount: Bool {
         return amount == 0
+    }
+    
+    // Helper function to format amount with $ prefix
+    private func formatAmount(_ value: Double) -> String {
+        if value == 0 {
+            return ""
+        }
+        return String(format: "$%.2f", value)
+    }
+    
+    // Helper function to parse amount from text (removing $ and converting to Double)
+    private func parseAmount(_ text: String) -> Double? {
+        let cleanText = text.replacingOccurrences(of: "$", with: "").trimmingCharacters(in: .whitespaces)
+        return Double(cleanText)
+    }
+    
+    // Helper function to format user input with $ prefix
+    private func formatUserInput(_ text: String) -> String {
+        let cleanText = text.replacingOccurrences(of: "$", with: "")
+        if cleanText.isEmpty {
+            return ""
+        }
+        return "$" + cleanText
     }
     
     var body: some View {
@@ -219,20 +257,32 @@ struct AmountInput: View {
             .textFieldStyle(RoundedBorderTextFieldStyle())
             .keyboardType(.decimalPad)
             .frame(width: 80)
-            .foregroundColor(isDefaultAmount && !focused ? .gray : .primary)
+            .foregroundColor(isDefaultAmount && !isFocused ? .gray : .primary)
             .onAppear {
-                displayText = isDefaultAmount ? "" : String(format: "%.2f", amount)
+                displayText = formatAmount(amount)
             }
-            .onChange(of: focused) { isFocused in
-                if isFocused {
+            .onChange(of: amount) { newAmount in
+                // Update displayText when amount changes externally (e.g., from populate button)
+                if !isFocused {
+                    displayText = formatAmount(newAmount)
+                }
+            }
+            .onChange(of: isFocused) { focused in
+                if focused {
                     // If focusing and it's a default amount, clear the display
                     if isDefaultAmount {
                         displayText = ""
+                    } else {
+                        // Remove $ for editing, but keep the number
+                        if let value = parseAmount(displayText), value > 0 {
+                            displayText = String(format: "%.2f", value)
+                        }
                     }
                 } else {
-                    // If losing focus, save the entered amount
-                    if let newAmount = Double(displayText) {
+                    // If losing focus, save the entered amount and format with $
+                    if let newAmount = parseAmount(displayText) {
                         amount = newAmount
+                        displayText = formatAmount(newAmount)
                     } else if displayText.isEmpty {
                         // If empty, reset to 0
                         amount = 0
@@ -241,13 +291,19 @@ struct AmountInput: View {
                 }
             }
             .onChange(of: displayText) { newValue in
-                if focused && !newValue.isEmpty {
-                    if let newAmount = Double(newValue) {
+                if isFocused && !newValue.isEmpty {
+                    // Auto-add $ prefix if user starts typing without it
+                    if !newValue.hasPrefix("$") && !newValue.isEmpty {
+                        displayText = formatUserInput(newValue)
+                    }
+                    
+                    // Update the binding with the parsed value
+                    if let newAmount = parseAmount(newValue) {
                         amount = newAmount
                     }
                 }
             }
-            .focused($focused)
+            .focused($isFocused)
     }
 }
 
@@ -340,10 +396,9 @@ struct PlayerNameInput: View {
 
 struct ContentView: View {
     @StateObject private var viewModel = PokerGameViewModel()
-    @FocusState private var buyInFocused: Bool
-    @FocusState private var tableFocused: Bool
     @State private var keyboardVisible = false
     @State private var editingPlayerIndex: Int? = nil
+    @State private var showingResetAlert = false
     
     var body: some View {
         NavigationView {
@@ -358,30 +413,26 @@ struct ContentView: View {
                         Text("Poker Tracker")
                             .font(.subheadline)
                             .foregroundColor(.gray)
-                            
-                        // Buy-In Field + Populate
-                        HStack(spacing: 8) {
-                            Text("Buy-In: $")
-                            TextField("0", text: $viewModel.buyInText)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .keyboardType(.numberPad)
-                                .frame(width: 80)
-                                .focused($buyInFocused)
-                            
-                            Button("Populate") {
-                                buyInFocused = false
-                                tableFocused = false
-                                hideKeyboard()
-                                viewModel.populateAmounts()
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.blue)
-                            .cornerRadius(8)
-                        }
-                        .padding()
+                    }
+                    
+                    // Buy-In Field + Populate - always visible
+                    HStack(spacing: 8) {
+                        Text("Buy-In: $")
+                        BuyInInput(text: $viewModel.buyInText)
                         
+                        Button("Populate") {
+                            hideKeyboard()
+                            viewModel.populateAmounts()
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue)
+                        .cornerRadius(8)
+                    }
+                    .padding()
+                    
+                    if !keyboardVisible {
                         // Totals
                         VStack(spacing: 8) {
                             Text("Total In Play: $\(viewModel.totalInPlay, specifier: "%.2f")")
@@ -406,17 +457,11 @@ struct ContentView: View {
                             }
                         }
                         .padding(.bottom, 20)
-                    } else {
-                        // Compact header when keyboard is visible
-                        HStack {
-                            Text("Rebuy")
-                                .font(.headline)
-                                .foregroundColor(Constants.cardRed)
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
                     }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    hideKeyboard()
                 }
                 
                 // The table - will scroll to show the active text field
@@ -472,17 +517,12 @@ struct ContentView: View {
                                     
                                     ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, p in
                                         HStack(spacing: 0) {
-                                            AmountInput(amount: $viewModel.players[index].amount, focused: $tableFocused)
+                                            AmountInput(amount: $viewModel.players[index].amount)
                                             
                                             Checkbox(isChecked: $viewModel.players[index].venmoStatus)
                                                 .frame(width: 60)
                                             
-                                            TextField("Chips", value: $viewModel.players[index].chipCount,
-                                                    format: .currency(code: "USD"))
-                                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                                .keyboardType(.decimalPad)
-                                                .frame(width: 80)
-                                                .focused($tableFocused)
+                                            AmountInput(amount: $viewModel.players[index].chipCount)
                                             
                                             let profitLoss = viewModel.players[index].chipCount
                                                 - viewModel.players[index].amount
@@ -504,6 +544,10 @@ struct ContentView: View {
                             }
                         }
                         .padding(.horizontal)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        hideKeyboard()
                     }
                 }
                 
@@ -533,7 +577,7 @@ struct ContentView: View {
                             Spacer()
                             
                             Button(action: {
-                                viewModel.resetGame()
+                                showingResetAlert = true
                             }) {
                                 Text("Reset Game")
                                     .foregroundColor(.red)
@@ -541,6 +585,10 @@ struct ContentView: View {
                         }
                     }
                     .padding()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        hideKeyboard()
+                    }
                 }
             }
             .navigationBarItems(trailing:
@@ -552,13 +600,6 @@ struct ContentView: View {
                         .foregroundColor(.blue)
                 }
             )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Only hide keyboard if not tapping on input fields
-                if !buyInFocused && !tableFocused {
-                    hideKeyboard()
-                }
-            }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
                 keyboardVisible = true
             }
@@ -572,6 +613,14 @@ struct ContentView: View {
                 }
             } message: {
                 Text("Game will reset and save to Logs")
+            }
+            .alert("Are you sure?", isPresented: $showingResetAlert) {
+                Button("No", role: .cancel) { }
+                Button("Yes", role: .destructive) {
+                    viewModel.resetGame()
+                }
+            } message: {
+                Text("All values will be reset to zero.")
             }
         }
     }

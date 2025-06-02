@@ -10,17 +10,18 @@ struct PlayerStats {
     }
     
     var gameHistory: [(date: Date, profitLoss: Double)] {
-        // Sort by date
+        // Sort by date - most recent first
         return zip(games, playerResults)
             .map { (game, result) in
                 (date: game.endDate, profitLoss: result.profitLoss)
             }
-            .sorted { $0.date < $1.date }
+            .sorted { $0.date > $1.date }
     }
 }
 
 struct ProfitLossChart: View {
     let data: [(date: Date, profitLoss: Double)]
+    @State private var selectedPointIndex: Int? = nil
     
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -28,11 +29,17 @@ struct ProfitLossChart: View {
         return formatter
     }
     
+    private var tooltipDateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }
+    
     var body: some View {
         GeometryReader { geometry in
             if data.count > 1 {
                 // Calculate chart area dimensions with proper margins
-                let chartMargin = EdgeInsets(top: 30, leading: 60, bottom: 40, trailing: 20)
+                let chartMargin = EdgeInsets(top: 30, leading: 40, bottom: 40, trailing: 20)
                 let chartWidth = geometry.size.width - chartMargin.leading - chartMargin.trailing
                 let chartHeight = geometry.size.height - chartMargin.top - chartMargin.bottom
                 
@@ -45,112 +52,129 @@ struct ProfitLossChart: View {
                 let zeroY = chartMargin.top + chartHeight * (maxProfit / range)
                 
                 ZStack(alignment: .topLeading) {
-                    // Y-axis label
-                    HStack(spacing: 4) {
-                        Image(systemName: "dollarsign.circle")
-                            .foregroundColor(.gray)
-                        Text("Profit/Loss")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                    .rotationEffect(Angle(degrees: -90))
-                    .position(x: 15, y: geometry.size.height / 2)
-                    
-                    // Y-axis with tick marks
-                    Group {
-                        // Y-axis line
+                    // Zero line (only reference line we keep)
+                    if minProfit < 0 && maxProfit > 0 {
                         Path { path in
-                            path.move(to: CGPoint(x: chartMargin.leading, y: chartMargin.top))
-                            path.addLine(to: CGPoint(x: chartMargin.leading, y: chartMargin.top + chartHeight))
+                            path.move(to: CGPoint(x: chartMargin.leading, y: zeroY))
+                            path.addLine(to: CGPoint(x: geometry.size.width - chartMargin.trailing, y: zeroY))
                         }
-                        .stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                        .stroke(Color.gray.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                         
-                        // Zero line
-                        if minProfit < 0 && maxProfit > 0 {
-                            Path { path in
-                                path.move(to: CGPoint(x: chartMargin.leading, y: zeroY))
-                                path.addLine(to: CGPoint(x: geometry.size.width - chartMargin.trailing, y: zeroY))
-                            }
-                            .stroke(Color.gray, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                            
-                            // Zero label
-                            Text("$0")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                .position(x: chartMargin.leading - 20, y: zeroY)
-                        }
-                        
-                        // Max value tick and label
-                        Text(maxProfit.formatted(.currency(code: "USD")))
+                        // Zero label
+                        Text("$0")
                             .font(.caption)
                             .foregroundColor(.gray)
-                            .position(x: chartMargin.leading - 25, y: chartMargin.top)
-                        
-                        // Min value tick and label
-                        Text(minProfit.formatted(.currency(code: "USD")))
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .position(x: chartMargin.leading - 25, y: chartMargin.top + chartHeight)
+                            .position(x: chartMargin.leading - 15, y: zeroY)
                     }
                     
-                    // X-axis
-                    Group {
-                        // X-axis line
-                        Path { path in
-                            path.move(to: CGPoint(x: chartMargin.leading, y: chartMargin.top + chartHeight))
-                            path.addLine(to: CGPoint(x: geometry.size.width - chartMargin.trailing, y: chartMargin.top + chartHeight))
-                        }
-                        .stroke(Color.gray.opacity(0.5), lineWidth: 1)
-                        
-                        // Date labels
-                        ForEach(0..<data.count, id: \.self) { i in
-                            let xPos = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
-                            
-                            // Tick mark
-                            Path { path in
-                                path.move(to: CGPoint(x: xPos, y: chartMargin.top + chartHeight))
-                                path.addLine(to: CGPoint(x: xPos, y: chartMargin.top + chartHeight + 5))
-                            }
-                            .stroke(Color.gray.opacity(0.5), lineWidth: 1)
-                            
-                            // Date label
-                            Text(dateFormatter.string(from: data[i].date))
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                .position(x: xPos, y: chartMargin.top + chartHeight + 20)
-                        }
-                    }
-                    
-                    // Chart line
+                    // X-axis (bottom line only)
                     Path { path in
+                        path.move(to: CGPoint(x: chartMargin.leading, y: chartMargin.top + chartHeight))
+                        path.addLine(to: CGPoint(x: geometry.size.width - chartMargin.trailing, y: chartMargin.top + chartHeight))
+                    }
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    
+                    // Date labels
+                    ForEach(0..<data.count, id: \.self) { i in
+                        let xPos = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
+                        
+                        // Date label
+                        Text(dateFormatter.string(from: data[i].date))
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                            .position(x: xPos, y: chartMargin.top + chartHeight + 20)
+                    }
+                    
+                    // Curved chart line
+                    Path { path in
+                        guard data.count > 1 else { return }
+                        
+                        // Convert data points to chart coordinates
+                        let points = data.enumerated().map { (index, item) in
+                            let x = chartMargin.leading + (CGFloat(index) * (chartWidth / CGFloat(data.count - 1)))
+                            let y = chartMargin.top + chartHeight * (1 - (item.profitLoss - minProfit) / range)
+                            return CGPoint(x: x, y: y)
+                        }
+                        
                         // Start the path
-                        let startX = chartMargin.leading
-                        let startY = chartMargin.top + chartHeight * (1 - (data[0].profitLoss - minProfit) / range)
+                        path.move(to: points[0])
                         
-                        path.move(to: CGPoint(x: startX, y: startY))
-                        
-                        // Draw the line
-                        for i in 1..<data.count {
-                            let x = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
-                            let y = chartMargin.top + chartHeight * (1 - (data[i].profitLoss - minProfit) / range)
+                        // Create smooth curves between points
+                        for i in 1..<points.count {
+                            let previousPoint = points[i-1]
+                            let currentPoint = points[i]
                             
-                            path.addLine(to: CGPoint(x: x, y: y))
+                            // Calculate control points for smooth curve
+                            let controlPoint1 = CGPoint(
+                                x: previousPoint.x + (currentPoint.x - previousPoint.x) * 0.4,
+                                y: previousPoint.y
+                            )
+                            let controlPoint2 = CGPoint(
+                                x: currentPoint.x - (currentPoint.x - previousPoint.x) * 0.4,
+                                y: currentPoint.y
+                            )
+                            
+                            path.addCurve(to: currentPoint, control1: controlPoint1, control2: controlPoint2)
                         }
                     }
-                    .stroke(Color.blue, lineWidth: 2)
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
                     
                     // Data points
                     ForEach(0..<data.count, id: \.self) { i in
                         let x = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
                         let y = chartMargin.top + chartHeight * (1 - (data[i].profitLoss - minProfit) / range)
                         
-                        Circle()
-                            .fill(data[i].profitLoss >= 0 ? Color.green : Color.red)
-                            .frame(width: 8, height: 8)
-                            .position(x: x, y: y)
+                        Button(action: {
+                            selectedPointIndex = selectedPointIndex == i ? nil : i
+                        }) {
+                            Circle()
+                                .fill(data[i].profitLoss >= 0 ? Color.green : Color.red)
+                                .frame(width: selectedPointIndex == i ? 12 : 8, 
+                                       height: selectedPointIndex == i ? 12 : 8)
+                                .scaleEffect(selectedPointIndex == i ? 1.2 : 1.0)
+                                .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .position(x: x, y: y)
+                    }
+                    
+                    // Tooltip for selected point
+                    if let selectedIndex = selectedPointIndex {
+                        let selectedData = data[selectedIndex]
+                        let x = chartMargin.leading + (CGFloat(selectedIndex) * (chartWidth / CGFloat(data.count - 1)))
+                        let y = chartMargin.top + chartHeight * (1 - (selectedData.profitLoss - minProfit) / range)
+                        
+                        // Position tooltip above or below point based on available space
+                        let tooltipY = y < geometry.size.height / 2 ? y + 40 : y - 40
+                        
+                        VStack(spacing: 4) {
+                            Text(tooltipDateFormatter.string(from: selectedData.date))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            Text(selectedData.profitLoss.formatted(.currency(code: "USD")))
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(selectedData.profitLoss >= 0 ? .green : .red)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        )
+                        .position(x: x, y: tooltipY)
+                        .transition(.scale.combined(with: .opacity))
+                        .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    // Tap outside to deselect
+                    selectedPointIndex = nil
+                }
             } else if data.count == 1 {
                 // For a single data point
                 VStack(spacing: 10) {

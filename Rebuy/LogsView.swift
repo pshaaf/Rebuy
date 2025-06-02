@@ -22,8 +22,12 @@ struct LogsView: View {
                             .foregroundColor(.gray)
                     }
                     
-                    // Player results
-                    ForEach(log.players) { player in
+                    // Player results - sorted by P/L descending
+                    ForEach(log.players.sorted { player1, player2 in
+                        let profitLoss1 = player1.finalChipCount - player1.buyIn
+                        let profitLoss2 = player2.finalChipCount - player2.buyIn
+                        return profitLoss1 > profitLoss2
+                    }) { player in
                         Button(action: {
                             self.selectedPlayer = player
                             self.isShowingPlayerStats = true
