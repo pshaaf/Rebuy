@@ -10,12 +10,21 @@ struct PlayerStats {
     }
     
     var gameHistory: [(date: Date, profitLoss: Double)] {
-        // Sort by date - most recent first
+        // Sort by date - most recent first (for the Game Details list)
         return zip(games, playerResults)
             .map { (game, result) in
                 (date: game.endDate, profitLoss: result.profitLoss)
             }
             .sorted { $0.date > $1.date }
+    }
+    
+    var chartData: [(date: Date, profitLoss: Double)] {
+        // Sort by date - chronological order (oldest to newest for the chart)
+        return zip(games, playerResults)
+            .map { (game, result) in
+                (date: game.endDate, profitLoss: result.profitLoss)
+            }
+            .sorted { $0.date < $1.date }
     }
 }
 
@@ -211,17 +220,20 @@ struct PlayerStatsView: View {
     
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .center, spacing: 20) {
                 // Player name
                 Text(playerStats.name)
                     .font(.largeTitle)
                     .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
                 
                 // Overall P/L
-                HStack {
-                    Text("Overall Profit/Loss:")
+                VStack(spacing: 8) {
+                    Text("Overall Profit/Loss")
                         .font(.headline)
+                        .multilineTextAlignment(.center)
+                    
                     Text(playerStats.totalProfitLoss.formatted(.currency(code: "USD")))
                         .font(.headline)
                         .foregroundColor(playerStats.totalProfitLoss >= 0 ? .green : .red)
@@ -232,20 +244,23 @@ struct PlayerStatsView: View {
                 if !playerStats.gameHistory.isEmpty {
                     Text("Performance History")
                         .font(.headline)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal)
                     
-                    ProfitLossChart(data: playerStats.gameHistory)
+                    ProfitLossChart(data: playerStats.chartData)
                         .frame(height: 200)
                         .padding()
                 } else {
                     Text("No game history available")
                         .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
                 
                 // Game details
                 Text("Game Details")
                     .font(.headline)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
                 
                 ForEach(playerStats.gameHistory.indices, id: \.self) { index in
