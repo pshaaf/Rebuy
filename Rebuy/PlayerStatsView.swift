@@ -18,18 +18,25 @@ struct PlayerStats {
             .sorted { $0.date > $1.date }
     }
     
-    var chartData: [(date: Date, profitLoss: Double)] {
+    var chartData: [(date: Date, individualPL: Double, cumulativePL: Double)] {
         // Sort by date - chronological order (oldest to newest for the chart)
-        return zip(games, playerResults)
+        let sortedData = zip(games, playerResults)
             .map { (game, result) in
                 (date: game.endDate, profitLoss: result.profitLoss)
             }
             .sorted { $0.date < $1.date }
+        
+        // Calculate running total P/L while keeping individual game P/L
+        var runningTotal: Double = 0
+        return sortedData.map { item in
+            runningTotal += item.profitLoss
+            return (date: item.date, individualPL: item.profitLoss, cumulativePL: runningTotal)
+        }
     }
 }
 
 struct ProfitLossChart: View {
-    let data: [(date: Date, profitLoss: Double)]
+    let data: [(date: Date, individualPL: Double, cumulativePL: Double)]
     @State private var selectedPointIndex: Int? = nil
     
     private var dateFormatter: DateFormatter {
@@ -47,142 +54,166 @@ struct ProfitLossChart: View {
     var body: some View {
         GeometryReader { geometry in
             if data.count > 1 {
-                // Calculate chart area dimensions with proper margins
-                let chartMargin = EdgeInsets(top: 30, leading: 40, bottom: 40, trailing: 20)
-                let chartWidth = geometry.size.width - chartMargin.leading - chartMargin.trailing
-                let chartHeight = geometry.size.height - chartMargin.top - chartMargin.bottom
-                
-                // Find min and max for scaling
-                let maxProfit = data.map { $0.profitLoss }.max() ?? 0
-                let minProfit = min(data.map { $0.profitLoss }.min() ?? 0, 0) // Ensure we include zero
-                let range = max(maxProfit - minProfit, 1.0)
-                
-                // Calculate zero Y position
-                let zeroY = chartMargin.top + chartHeight * (maxProfit / range)
-                
-                ZStack(alignment: .topLeading) {
-                    // Zero line (only reference line we keep)
-                    if minProfit < 0 && maxProfit > 0 {
-                        Path { path in
-                            path.move(to: CGPoint(x: chartMargin.leading, y: zeroY))
-                            path.addLine(to: CGPoint(x: geometry.size.width - chartMargin.trailing, y: zeroY))
-                        }
-                        .stroke(Color.gray.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                        
-                        // Zero label
-                        Text("$0")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .position(x: chartMargin.leading - 15, y: zeroY)
-                    }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    // Calculate chart area dimensions with proper margins
+                    // Add minimal extra space just for tooltip visibility
+                    let baseWidth = geometry.size.width
+                    let tooltipSpace: CGFloat = 60 // Just enough space to see tooltips
+                    let totalWidth = baseWidth + tooltipSpace
                     
-                    // X-axis (bottom line only)
-                    Path { path in
-                        path.move(to: CGPoint(x: chartMargin.leading, y: chartMargin.top + chartHeight))
-                        path.addLine(to: CGPoint(x: geometry.size.width - chartMargin.trailing, y: chartMargin.top + chartHeight))
-                    }
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    let chartMargin = EdgeInsets(top: 30, leading: 40, bottom: 40, trailing: 20)
+                    let chartWidth = baseWidth - chartMargin.leading - chartMargin.trailing
+                    let chartHeight = geometry.size.height - chartMargin.top - chartMargin.bottom
                     
-                    // Date labels
-                    ForEach(0..<data.count, id: \.self) { i in
-                        let xPos = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
-                        
-                        // Date label
-                        Text(dateFormatter.string(from: data[i].date))
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .position(x: xPos, y: chartMargin.top + chartHeight + 20)
-                    }
+                    // Find min and max for scaling (use cumulative P/L for chart scaling)
+                    let maxProfit = data.map { $0.cumulativePL }.max() ?? 0
+                    let minProfit = min(data.map { $0.cumulativePL }.min() ?? 0, 0) // Ensure we include zero
+                    let range = max(maxProfit - minProfit, 1.0)
                     
-                    // Curved chart line
-                    Path { path in
-                        guard data.count > 1 else { return }
-                        
-                        // Convert data points to chart coordinates
-                        let points = data.enumerated().map { (index, item) in
-                            let x = chartMargin.leading + (CGFloat(index) * (chartWidth / CGFloat(data.count - 1)))
-                            let y = chartMargin.top + chartHeight * (1 - (item.profitLoss - minProfit) / range)
-                            return CGPoint(x: x, y: y)
-                        }
-                        
-                        // Start the path
-                        path.move(to: points[0])
-                        
-                        // Create smooth curves between points
-                        for i in 1..<points.count {
-                            let previousPoint = points[i-1]
-                            let currentPoint = points[i]
+                    // Calculate zero Y position
+                    let zeroY = chartMargin.top + chartHeight * (maxProfit / range)
+                    
+                    ZStack(alignment: .topLeading) {
+                        // Zero line (only reference line we keep)
+                        if minProfit < 0 && maxProfit > 0 {
+                            Path { path in
+                                path.move(to: CGPoint(x: chartMargin.leading, y: zeroY))
+                                path.addLine(to: CGPoint(x: baseWidth - chartMargin.trailing, y: zeroY))
+                            }
+                            .stroke(Color.gray.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                             
-                            // Calculate control points for smooth curve
-                            let controlPoint1 = CGPoint(
-                                x: previousPoint.x + (currentPoint.x - previousPoint.x) * 0.4,
-                                y: previousPoint.y
-                            )
-                            let controlPoint2 = CGPoint(
-                                x: currentPoint.x - (currentPoint.x - previousPoint.x) * 0.4,
-                                y: currentPoint.y
-                            )
-                            
-                            path.addCurve(to: currentPoint, control1: controlPoint1, control2: controlPoint2)
-                        }
-                    }
-                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                    
-                    // Data points
-                    ForEach(0..<data.count, id: \.self) { i in
-                        let x = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
-                        let y = chartMargin.top + chartHeight * (1 - (data[i].profitLoss - minProfit) / range)
-                        
-                        Button(action: {
-                            selectedPointIndex = selectedPointIndex == i ? nil : i
-                        }) {
-                            Circle()
-                                .fill(data[i].profitLoss >= 0 ? Color.green : Color.red)
-                                .frame(width: selectedPointIndex == i ? 12 : 8, 
-                                       height: selectedPointIndex == i ? 12 : 8)
-                                .scaleEffect(selectedPointIndex == i ? 1.2 : 1.0)
-                                .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .position(x: x, y: y)
-                    }
-                    
-                    // Tooltip for selected point
-                    if let selectedIndex = selectedPointIndex {
-                        let selectedData = data[selectedIndex]
-                        let x = chartMargin.leading + (CGFloat(selectedIndex) * (chartWidth / CGFloat(data.count - 1)))
-                        let y = chartMargin.top + chartHeight * (1 - (selectedData.profitLoss - minProfit) / range)
-                        
-                        // Position tooltip above or below point based on available space
-                        let tooltipY = y < geometry.size.height / 2 ? y + 40 : y - 40
-                        
-                        VStack(spacing: 4) {
-                            Text(tooltipDateFormatter.string(from: selectedData.date))
+                            // Zero label
+                            Text("$0")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            Text(selectedData.profitLoss.formatted(.currency(code: "USD")))
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(selectedData.profitLoss >= 0 ? .green : .red)
+                                .foregroundColor(.gray)
+                                .position(x: chartMargin.leading - 15, y: zeroY)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(.systemBackground))
-                                .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-                        )
-                        .position(x: x, y: tooltipY)
-                        .transition(.scale.combined(with: .opacity))
-                        .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
+                        
+                        // X-axis (bottom line only)
+                        Path { path in
+                            path.move(to: CGPoint(x: chartMargin.leading, y: chartMargin.top + chartHeight))
+                            path.addLine(to: CGPoint(x: baseWidth - chartMargin.trailing, y: chartMargin.top + chartHeight))
+                        }
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        
+                        // Date labels
+                        ForEach(0..<data.count, id: \.self) { i in
+                            let xPos = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
+                            
+                            // Date label
+                            Text(dateFormatter.string(from: data[i].date))
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                                .position(x: xPos, y: chartMargin.top + chartHeight + 20)
+                        }
+                        
+                        // Curved chart line (uses cumulative P/L)
+                        Path { path in
+                            guard data.count > 1 else { return }
+                            
+                            // Convert data points to chart coordinates using cumulative P/L
+                            let points = data.enumerated().map { (index, item) in
+                                let x = chartMargin.leading + (CGFloat(index) * (chartWidth / CGFloat(data.count - 1)))
+                                let y = chartMargin.top + chartHeight * (1 - (item.cumulativePL - minProfit) / range)
+                                return CGPoint(x: x, y: y)
+                            }
+                            
+                            // Start the path
+                            path.move(to: points[0])
+                            
+                            // Create smooth curves between points
+                            for i in 1..<points.count {
+                                let previousPoint = points[i-1]
+                                let currentPoint = points[i]
+                                
+                                // Calculate control points for smooth curve
+                                let controlPoint1 = CGPoint(
+                                    x: previousPoint.x + (currentPoint.x - previousPoint.x) * 0.4,
+                                    y: previousPoint.y
+                                )
+                                let controlPoint2 = CGPoint(
+                                    x: currentPoint.x - (currentPoint.x - previousPoint.x) * 0.4,
+                                    y: currentPoint.y
+                                )
+                                
+                                path.addCurve(to: currentPoint, control1: controlPoint1, control2: controlPoint2)
+                            }
+                        }
+                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                        
+                        // Data points (colored by individual game P/L)
+                        ForEach(0..<data.count, id: \.self) { i in
+                            let x = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
+                            let y = chartMargin.top + chartHeight * (1 - (data[i].cumulativePL - minProfit) / range)
+                            
+                            Button(action: {
+                                selectedPointIndex = selectedPointIndex == i ? nil : i
+                            }) {
+                                Circle()
+                                    .fill(data[i].individualPL >= 0 ? Color.green : Color.red)
+                                    .frame(width: selectedPointIndex == i ? 12 : 8, 
+                                           height: selectedPointIndex == i ? 12 : 8)
+                                    .scaleEffect(selectedPointIndex == i ? 1.2 : 1.0)
+                                    .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .position(x: x, y: y)
+                        }
+                        
+                        // Tooltip for selected point
+                        if let selectedIndex = selectedPointIndex {
+                            let selectedData = data[selectedIndex]
+                            let x = chartMargin.leading + (CGFloat(selectedIndex) * (chartWidth / CGFloat(data.count - 1)))
+                            let y = chartMargin.top + chartHeight * (1 - (selectedData.cumulativePL - minProfit) / range)
+                            
+                            // Position tooltip above or below point based on available space
+                            let tooltipY = y < geometry.size.height / 2 ? y + 50 : y - 50
+                            
+                            VStack(spacing: 4) {
+                                Text(tooltipDateFormatter.string(from: selectedData.date))
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                // Individual game P/L
+                                HStack(spacing: 4) {
+                                    Text("Game:")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(selectedData.individualPL.formatted(.currency(code: "USD")))
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(selectedData.individualPL >= 0 ? .green : .red)
+                                }
+                                
+                                // Overall P/L at this point
+                                HStack(spacing: 4) {
+                                    Text("Overall:")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text(selectedData.cumulativePL.formatted(.currency(code: "USD")))
+                                        .font(.headline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(selectedData.cumulativePL >= 0 ? .green : .red)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(.systemBackground))
+                                    .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                            )
+                            .position(x: x, y: tooltipY)
+                            .transition(.scale.combined(with: .opacity))
+                            .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
+                        }
                     }
-                }
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    // Tap outside to deselect
-                    selectedPointIndex = nil
+                    .frame(width: totalWidth, height: geometry.size.height)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // Tap outside to deselect
+                        selectedPointIndex = nil
+                    }
                 }
             } else if data.count == 1 {
                 // For a single data point
@@ -196,12 +227,12 @@ struct ProfitLossChart: View {
                             .font(.caption)
                         
                         Circle()
-                            .fill(data[0].profitLoss >= 0 ? Color.green : Color.red)
+                            .fill(data[0].individualPL >= 0 ? Color.green : Color.red)
                             .frame(width: 10, height: 10)
                         
-                        Text(data[0].profitLoss.formatted(.currency(code: "USD")))
+                        Text(data[0].cumulativePL.formatted(.currency(code: "USD")))
                             .font(.caption)
-                            .foregroundColor(data[0].profitLoss >= 0 ? .green : .red)
+                            .foregroundColor(data[0].cumulativePL >= 0 ? .green : .red)
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
