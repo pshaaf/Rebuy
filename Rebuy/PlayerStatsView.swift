@@ -9,11 +9,18 @@ struct PlayerStats {
         playerResults.reduce(0) { $0 + $1.profitLoss }
     }
     
-    var gameHistory: [(date: Date, profitLoss: Double)] {
+    var averageGameDuration: Int? {
+        let durations = games.compactMap { $0.duration }
+        guard !durations.isEmpty else { return nil }
+        let total = durations.reduce(0, +)
+        return total / durations.count
+    }
+    
+    var gameHistory: [(date: Date, profitLoss: Double, duration: Int?)] {
         // Sort by date - most recent first (for the Game Details list)
         return zip(games, playerResults)
             .map { (game, result) in
-                (date: game.endDate, profitLoss: result.profitLoss)
+                (date: game.endDate, profitLoss: result.profitLoss, duration: game.duration)
             }
             .sorted { $0.date > $1.date }
     }
@@ -249,6 +256,20 @@ struct ProfitLossChart: View {
 struct PlayerStatsView: View {
     let playerStats: PlayerStats
     
+    // Helper function to format duration
+    private func formatDuration(_ seconds: Int?) -> String {
+        guard let seconds = seconds else { return "N/A" }
+        
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+    
     var body: some View {
         ScrollView {
             VStack(alignment: .center, spacing: 20) {
@@ -270,6 +291,20 @@ struct PlayerStatsView: View {
                         .foregroundColor(playerStats.totalProfitLoss >= 0 ? .green : .red)
                 }
                 .padding(.horizontal)
+                
+                // Average game duration
+                if let avgDuration = playerStats.averageGameDuration {
+                    VStack(spacing: 8) {
+                        Text("Average Game Duration")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                        
+                        Text(formatDuration(avgDuration))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal)
+                }
                 
                 // Line graph
                 if !playerStats.gameHistory.isEmpty {
@@ -296,11 +331,19 @@ struct PlayerStatsView: View {
                 
                 ForEach(playerStats.gameHistory.indices, id: \.self) { index in
                     let historyItem = playerStats.gameHistory[index]
-                    HStack {
-                        Text(historyItem.date.formatted(date: .abbreviated, time: .omitted))
-                        Spacer()
-                        Text(historyItem.profitLoss.formatted(.currency(code: "USD")))
-                            .foregroundColor(historyItem.profitLoss >= 0 ? .green : .red)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(historyItem.date.formatted(date: .abbreviated, time: .omitted))
+                            Spacer()
+                            Text(historyItem.profitLoss.formatted(.currency(code: "USD")))
+                                .foregroundColor(historyItem.profitLoss >= 0 ? .green : .red)
+                        }
+                        
+                        if historyItem.duration != nil {
+                            Text("Duration: \(formatDuration(historyItem.duration))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     .padding(.horizontal)
                     .padding(.vertical, 4)

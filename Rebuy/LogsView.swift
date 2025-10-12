@@ -10,12 +10,26 @@ struct LogsView: View {
         viewModel.gameLogs.sorted { $0.endDate > $1.endDate }
     }
     
+    // Helper function to format duration
+    private func formatDuration(_ seconds: Int?) -> String {
+        guard let seconds = seconds else { return "" }
+        
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        
+        if hours > 0 {
+            return " • \(hours)h \(minutes)m"
+        } else {
+            return " • \(minutes)m"
+        }
+    }
+    
     var body: some View {
         List {
             ForEach(sortedLogs) { log in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(log.formattedDate)
+                        Text(log.formattedDate + formatDuration(log.duration))
                             .font(.headline)
                         Spacer()
                         Text("Total: \(log.totalBuyIn.formatted(.currency(code: "USD")))")

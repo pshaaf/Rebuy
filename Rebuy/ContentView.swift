@@ -55,6 +55,9 @@ class PokerGameViewModel: ObservableObject {
     @Published var showingEndGameAlert = false
     @Published var gameLogs: [GameLog] = []
     @Published var shouldShowLogs = false
+    @Published var gameStartTime: Date?
+    @Published var isGameActive: Bool = false
+    @Published var currentTime: Date = Date() // For timer updates
     
     init() {
         self.players = [
@@ -77,6 +80,33 @@ class PokerGameViewModel: ObservableObject {
     
     var totalChipCount: Double {
         players.reduce(0) { $0 + $1.chipCount }
+    }
+    
+    var elapsedTime: TimeInterval {
+        guard let startTime = gameStartTime else { return 0 }
+        return currentTime.timeIntervalSince(startTime)
+    }
+    
+    var formattedElapsedTime: String {
+        let seconds = Int(elapsedTime)
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        let secs = seconds % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        } else {
+            return String(format: "%d:%02d", minutes, secs)
+        }
+    }
+    
+    func startGame() {
+        gameStartTime = Date()
+        isGameActive = true
+    }
+    
+    func stopGame() {
+        isGameActive = false
     }
     
     // Function to update player name in game logs
@@ -115,7 +145,14 @@ class PokerGameViewModel: ObservableObject {
             )
         }
         
+        // Calculate duration if game was started
+        let duration: Int? = {
+            guard let startTime = gameStartTime else { return nil }
+            return Int(Date().timeIntervalSince(startTime))
+        }()
+        
         return GameLog(
+            duration: duration,
             players: playerResults,
             totalBuyIn: totalInPlay,
             totalChipCount: totalChipCount
@@ -151,6 +188,7 @@ class PokerGameViewModel: ObservableObject {
     }
     
     func endAndSaveGame() {
+        stopGame()
         let newLog = createGameLog()
         gameLogs.append(newLog)
         saveGameLogs()
@@ -160,6 +198,8 @@ class PokerGameViewModel: ObservableObject {
     
     func resetGame() {
         buyInText = ""
+        gameStartTime = nil
+        isGameActive = false
         players = [
             Player(name: "Player 1", amount: 0, venmoStatus: false, chipCount: 0),
             Player(name: "Player 2", amount: 0, venmoStatus: false, chipCount: 0),
@@ -400,6 +440,8 @@ struct ContentView: View {
     @State private var editingPlayerIndex: Int? = nil
     @State private var showingResetAlert = false
     
+    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -431,6 +473,41 @@ struct ContentView: View {
                         .cornerRadius(8)
                     }
                     .padding()
+                    
+                    // Timer section
+                    if !keyboardVisible {
+                        HStack(spacing: 12) {
+                            if !viewModel.isGameActive {
+                                Button(action: {
+                                    viewModel.startGame()
+                                }) {
+                                    HStack {
+                                        Image(systemName: "play.circle.fill")
+                                        Text("Start Game")
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(Color.green)
+                                    .cornerRadius(8)
+                                }
+                            } else {
+                                HStack {
+                                    Image(systemName: "timer")
+                                        .foregroundColor(.blue)
+                                    Text(viewModel.formattedElapsedTime)
+                                        .font(.headline)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.blue)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color.blue.opacity(0.1))
+                                .cornerRadius(8)
+                            }
+                        }
+                        .padding(.bottom, 8)
+                    }
                     
                     if !keyboardVisible {
                         // Totals
@@ -605,6 +682,11 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 keyboardVisible = false
+            }
+            .onReceive(timer) { _ in
+                if viewModel.isGameActive {
+                    viewModel.currentTime = Date()
+                }
             }
             .alert("Are you sure?", isPresented: $viewModel.showingEndGameAlert) {
                 Button("Cancel", role: .cancel) { }
