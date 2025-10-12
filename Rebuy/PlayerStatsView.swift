@@ -16,6 +16,27 @@ struct PlayerStats {
         return total / durations.count
     }
     
+    // Rebuy statistics
+    var totalRebuys: Int {
+        playerResults.reduce(0) { $0 + $1.rebuyCount }
+    }
+    
+    var rebuyRate: Double {
+        guard !playerResults.isEmpty else { return 0 }
+        let gamesWithRebuys = playerResults.filter { $0.rebuyCount > 0 }.count
+        return Double(gamesWithRebuys) / Double(playerResults.count) * 100
+    }
+    
+    var averageBuyInsPerGame: Double {
+        guard !playerResults.isEmpty else { return 0 }
+        let totalBuyIns = playerResults.reduce(0) { $0 + $1.buyIns.count }
+        return Double(totalBuyIns) / Double(playerResults.count)
+    }
+    
+    var totalInvested: Double {
+        playerResults.reduce(0) { $0 + $1.totalBuyIn }
+    }
+    
     var gameHistory: [(date: Date, profitLoss: Double, duration: Int?)] {
         // Sort by date - most recent first (for the Game Details list)
         return zip(games, playerResults)
@@ -292,19 +313,96 @@ struct PlayerStatsView: View {
                 }
                 .padding(.horizontal)
                 
-                // Average game duration
-                if let avgDuration = playerStats.averageGameDuration {
-                    VStack(spacing: 8) {
-                        Text("Average Game Duration")
-                            .font(.headline)
-                            .multilineTextAlignment(.center)
+                // Statistics grid
+                VStack(spacing: 12) {
+                    // Total invested
+                    HStack(spacing: 20) {
+                        VStack(spacing: 4) {
+                            Text("Total Invested")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(playerStats.totalInvested.formatted(.currency(code: "USD")))
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
                         
-                        Text(formatDuration(avgDuration))
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        Divider()
+                            .frame(height: 40)
+                        
+                        VStack(spacing: 4) {
+                            Text("Games Played")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(playerStats.games.count)")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                        }
                     }
                     .padding(.horizontal)
+                    
+                    // Rebuy statistics
+                    if playerStats.totalRebuys > 0 {
+                        VStack(spacing: 8) {
+                            Text("Rebuy Statistics")
+                                .font(.headline)
+                                .multilineTextAlignment(.center)
+                            
+                            HStack(spacing: 20) {
+                                VStack(spacing: 4) {
+                                    Text("Total Rebuys")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(playerStats.totalRebuys)")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                }
+                                
+                                Divider()
+                                    .frame(height: 40)
+                                
+                                VStack(spacing: 4) {
+                                    Text("Rebuy Rate")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(playerStats.rebuyRate, specifier: "%.0f")%")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                }
+                                
+                                Divider()
+                                    .frame(height: 40)
+                                
+                                VStack(spacing: 4) {
+                                    Text("Avg Buy-ins")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("\(playerStats.averageBuyInsPerGame, specifier: "%.1f")")
+                                        .font(.subheadline)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    
+                    // Average game duration
+                    if let avgDuration = playerStats.averageGameDuration {
+                        VStack(spacing: 8) {
+                            Text("Average Game Duration")
+                                .font(.headline)
+                                .multilineTextAlignment(.center)
+                            
+                            Text(formatDuration(avgDuration))
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal)
+                    }
                 }
+                .padding(.vertical, 8)
                 
                 // Line graph
                 if !playerStats.gameHistory.isEmpty {

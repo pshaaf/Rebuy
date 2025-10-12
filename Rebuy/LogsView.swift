@@ -29,35 +29,65 @@ struct LogsView: View {
             ForEach(sortedLogs) { log in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(log.formattedDate + formatDuration(log.duration))
-                            .font(.headline)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(log.formattedDate + formatDuration(log.duration))
+                                .font(.headline)
+                            
+                            // Show rebuy count if any
+                            let totalRebuys = log.players.reduce(0) { $0 + $1.rebuyCount }
+                            if totalRebuys > 0 {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.clockwise.circle.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                    Text("\(totalRebuys) rebuy\(totalRebuys == 1 ? "" : "s")")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                        }
+                        
                         Spacer()
+                        
                         Text("Total: \(log.totalBuyIn.formatted(.currency(code: "USD")))")
                             .foregroundColor(.gray)
                     }
                     
                     // Player results - sorted by P/L descending
                     ForEach(log.players.sorted { player1, player2 in
-                        let profitLoss1 = player1.finalChipCount - player1.buyIn
-                        let profitLoss2 = player2.finalChipCount - player2.buyIn
-                        return profitLoss1 > profitLoss2
+                        return player1.profitLoss > player2.profitLoss
                     }) { player in
                         Button(action: {
                             self.selectedPlayer = player
                             self.isShowingPlayerStats = true
                         }) {
-                            VStack(alignment: .leading) {
+                            VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     Text(player.name)
                                         .foregroundColor(.blue)
                                         .underline()
                                     
                                     Spacer()
-                                    let profitLoss = player.finalChipCount - player.buyIn
-                                    Text(profitLoss.formatted(.currency(code: "USD")))
-                                        .foregroundColor(profitLoss >= 0 ? .green : .red)
+                                    Text(player.profitLoss.formatted(.currency(code: "USD")))
+                                        .foregroundColor(player.profitLoss >= 0 ? .green : .red)
                                 }
                                 .font(.subheadline)
+                                
+                                // Show buy-in details if multiple buy-ins
+                                if player.buyIns.count > 1 {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.caption2)
+                                            .foregroundColor(.orange)
+                                        Text("\(player.buyIns.count) buy-ins • Total: \(player.totalBuyIn.formatted(.currency(code: "USD")))")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
+                                } else if !player.buyIns.isEmpty {
+                                    Text("Buy-in: \(player.totalBuyIn.formatted(.currency(code: "USD")))")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
                             }
                         }
                         .buttonStyle(PlainButtonStyle())

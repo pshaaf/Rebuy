@@ -44,9 +44,17 @@ struct Checkbox: View {
 struct Player: Identifiable, Equatable {
     let id = UUID()
     var name: String
-    var amount: Double
+    var buyIns: [BuyIn]
     var venmoStatus: Bool
     var chipCount: Double
+    
+    var totalInvested: Double {
+        return buyIns.reduce(0) { $0 + $1.amount }
+    }
+    
+    var rebuyCount: Int {
+        return buyIns.filter { $0.type != .initial }.count
+    }
 }
 
 class PokerGameViewModel: ObservableObject {
@@ -61,10 +69,10 @@ class PokerGameViewModel: ObservableObject {
     
     init() {
         self.players = [
-            Player(name: "Player 1", amount: 0, venmoStatus: false, chipCount: 0),
-            Player(name: "Player 2", amount: 0, venmoStatus: false, chipCount: 0),
-            Player(name: "Player 3", amount: 0, venmoStatus: false, chipCount: 0),
-            Player(name: "Player 4", amount: 0, venmoStatus: false, chipCount: 0)
+            Player(name: "Player 1", buyIns: [], venmoStatus: false, chipCount: 0),
+            Player(name: "Player 2", buyIns: [], venmoStatus: false, chipCount: 0),
+            Player(name: "Player 3", buyIns: [], venmoStatus: false, chipCount: 0),
+            Player(name: "Player 4", buyIns: [], venmoStatus: false, chipCount: 0)
         ]
         
         // Load saved game logs
@@ -75,7 +83,7 @@ class PokerGameViewModel: ObservableObject {
     }
     
     var totalInPlay: Double {
-        players.reduce(0) { $0 + $1.amount }
+        players.reduce(0) { $0 + $1.totalInvested }
     }
     
     var totalChipCount: Double {
@@ -139,7 +147,7 @@ class PokerGameViewModel: ObservableObject {
         let playerResults = players.map { player in
             PlayerResult(
                 name: player.name,
-                buyIn: player.amount,
+                buyIns: player.buyIns,
                 finalChipCount: player.chipCount,
                 venmoStatus: player.venmoStatus
             )
@@ -167,20 +175,38 @@ class PokerGameViewModel: ObservableObject {
     }
     
     func populateAmounts() {
-        if let amount = Double(buyInText) {
+        if let amount = Double(buyInText), amount > 0 {
             for index in players.indices {
-                if players[index].amount == 0 {
-                    players[index].amount = amount
+                if players[index].buyIns.isEmpty {
+                    let initialBuyIn = BuyIn(amount: amount, type: .initial)
+                    players[index].buyIns.append(initialBuyIn)
                 }
             }
         }
     }
     
+    func addBuyIn(for playerIndex: Int, amount: Double) {
+        guard amount > 0, playerIndex < players.count else { return }
+        
+        // Auto-detect type: first buy-in is Initial, subsequent are Rebuy
+        let type: BuyInType = players[playerIndex].buyIns.isEmpty ? .initial : .rebuy
+        let newBuyIn = BuyIn(amount: amount, type: type)
+        players[playerIndex].buyIns.append(newBuyIn)
+    }
+    
+    func removeBuyIn(for playerIndex: Int, buyInId: UUID) {
+        guard playerIndex < players.count else { return }
+        players[playerIndex].buyIns.removeAll { $0.id == buyInId }
+    }
+    
     func addPlayer() {
-        let amount = Double(buyInText) ?? 0
+        var buyIns: [BuyIn] = []
+        if let amount = Double(buyInText), amount > 0 {
+            buyIns = [BuyIn(amount: amount, type: .initial)]
+        }
         let newPlayer = Player(
             name: "Player \(players.count + 1)",
-            amount: amount,
+            buyIns: buyIns,
             venmoStatus: false,
             chipCount: 0
         )
@@ -201,10 +227,10 @@ class PokerGameViewModel: ObservableObject {
         gameStartTime = nil
         isGameActive = false
         players = [
-            Player(name: "Player 1", amount: 0, venmoStatus: false, chipCount: 0),
-            Player(name: "Player 2", amount: 0, venmoStatus: false, chipCount: 0),
-            Player(name: "Player 3", amount: 0, venmoStatus: false, chipCount: 0),
-            Player(name: "Player 4", amount: 0, venmoStatus: false, chipCount: 0)
+            Player(name: "Player 1", buyIns: [], venmoStatus: false, chipCount: 0),
+            Player(name: "Player 2", buyIns: [], venmoStatus: false, chipCount: 0),
+            Player(name: "Player 3", buyIns: [], venmoStatus: false, chipCount: 0),
+            Player(name: "Player 4", buyIns: [], venmoStatus: false, chipCount: 0)
         ]
     }
     
@@ -434,11 +460,100 @@ struct PlayerNameInput: View {
     }
 }
 
+// Component for displaying buy-in chips
+struct BuyInChipView: View {
+    let buyIn: BuyIn
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(buyIn.amount.formatted(.currency(code: "USD")))
+                .font(.caption)
+                .fontWeight(.medium)
+            
+            Button(action: onDelete) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(buyInTypeColor(buyIn.type))
+        .cornerRadius(12)
+    }
+    
+    private func buyInTypeColor(_ type: BuyInType) -> Color {
+        switch type {
+        case .initial: return .blue
+        case .rebuy: return .orange
+        case .addOn: return .purple
+        }
+    }
+}
+
+// Component for buy-ins display with horizontal scroll
+struct BuyInsDisplay: View {
+    let buyIns: [BuyIn]
+    let playerIndex: Int
+    let onAddBuyIn: () -> Void
+    let onDeleteBuyIn: (UUID) -> Void
+    
+    var totalInvested: Double {
+        buyIns.reduce(0) { $0 + $1.amount }
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                // Horizontal scrollable buy-in chips
+                if !buyIns.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(buyIns) { buyIn in
+                                BuyInChipView(buyIn: buyIn) {
+                                    onDeleteBuyIn(buyIn.id)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 180)
+                } else {
+                    Text("No buy-ins")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .frame(width: 80)
+                }
+                
+                // Add button
+                Button(action: onAddBuyIn) {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.title3)
+                }
+            }
+            
+            // Total invested (bold)
+            if !buyIns.isEmpty {
+                Text("Total: \(totalInvested.formatted(.currency(code: "USD")))")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.primary)
+            }
+        }
+        .frame(width: 200, alignment: .leading)
+    }
+}
+
 struct ContentView: View {
     @StateObject private var viewModel = PokerGameViewModel()
     @State private var keyboardVisible = false
     @State private var editingPlayerIndex: Int? = nil
     @State private var showingResetAlert = false
+    @State private var showingAddBuyInSheet = false
+    @State private var selectedPlayerIndex: Int? = nil
+    @State private var buyInAmount: String = ""
+    @State private var buyInType: BuyInType = .rebuy
     
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -574,9 +689,9 @@ struct ContentView: View {
                                 VStack(spacing: 0) {
                                     // Headers
                                     HStack(spacing: 0) {
-                                        Text("Amount")
+                                        Text("Buy-ins")
                                             .font(.headline)
-                                            .frame(width: 80, alignment: .leading)
+                                            .frame(width: 200, alignment: .leading)
                                         Text("Paid?")
                                             .font(.headline)
                                             .frame(width: 60, alignment: .center)
@@ -594,7 +709,20 @@ struct ContentView: View {
                                     
                                     ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, p in
                                         HStack(spacing: 0) {
-                                            AmountInput(amount: $viewModel.players[index].amount)
+                                            BuyInsDisplay(
+                                                buyIns: viewModel.players[index].buyIns,
+                                                playerIndex: index,
+                                                onAddBuyIn: {
+                                                    selectedPlayerIndex = index
+                                                    // Auto-detect type
+                                                    buyInType = viewModel.players[index].buyIns.isEmpty ? .initial : .rebuy
+                                                    buyInAmount = viewModel.buyInText
+                                                    showingAddBuyInSheet = true
+                                                },
+                                                onDeleteBuyIn: { buyInId in
+                                                    viewModel.removeBuyIn(for: index, buyInId: buyInId)
+                                                }
+                                            )
                                             
                                             Checkbox(isChecked: $viewModel.players[index].venmoStatus)
                                                 .frame(width: 60)
@@ -602,7 +730,7 @@ struct ContentView: View {
                                             AmountInput(amount: $viewModel.players[index].chipCount)
                                             
                                             let profitLoss = viewModel.players[index].chipCount
-                                                - viewModel.players[index].amount
+                                                - viewModel.players[index].totalInvested
                                             Text(profitLoss.formatted(.currency(code: "USD")))
                                                 .frame(width: 80, alignment: .leading)
                                                 .foregroundColor(profitLoss >= 0 ? .green : .red)
@@ -704,6 +832,19 @@ struct ContentView: View {
             } message: {
                 Text("All values will be reset to zero.")
             }
+            .sheet(isPresented: $showingAddBuyInSheet) {
+                AddBuyInView(
+                    amount: $buyInAmount,
+                    buyInType: $buyInType,
+                    onSave: {
+                        if let index = selectedPlayerIndex,
+                           let amount = Double(buyInAmount), amount > 0 {
+                            viewModel.addBuyIn(for: index, amount: amount)
+                            buyInAmount = ""
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -713,3 +854,4 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
     }
 }
+
