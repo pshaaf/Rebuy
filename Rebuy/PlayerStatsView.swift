@@ -4,9 +4,16 @@ struct PlayerStats {
     let name: String
     let games: [GameLog]
     let playerResults: [PlayerResult]
+    let manualEntries: [ManualGameEntry]
     
     var totalProfitLoss: Double {
-        playerResults.reduce(0) { $0 + $1.profitLoss }
+        let regularPL = playerResults.reduce(0) { $0 + $1.profitLoss }
+        let manualPL = manualEntries.reduce(0) { $0 + $1.profitLoss }
+        return regularPL + manualPL
+    }
+    
+    var totalGames: Int {
+        return games.count + manualEntries.count
     }
     
     var averageGameDuration: Int? {
@@ -37,22 +44,34 @@ struct PlayerStats {
         playerResults.reduce(0) { $0 + $1.totalBuyIn }
     }
     
-    var gameHistory: [(date: Date, profitLoss: Double, duration: Int?)] {
-        // Sort by date - most recent first (for the Game Details list)
-        return zip(games, playerResults)
+    var gameHistory: [(date: Date, profitLoss: Double, duration: Int?, isManual: Bool, entryId: UUID?)] {
+        // Combine regular games and manual entries
+        let regularGames = zip(games, playerResults)
             .map { (game, result) in
-                (date: game.endDate, profitLoss: result.profitLoss, duration: game.duration)
+                (date: game.endDate, profitLoss: result.profitLoss, duration: game.duration, isManual: false, entryId: nil as UUID?)
             }
-            .sorted { $0.date > $1.date }
+        
+        let manualGames = manualEntries.map { entry in
+            (date: entry.date, profitLoss: entry.profitLoss, duration: nil as Int?, isManual: true, entryId: entry.id as UUID?)
+        }
+        
+        // Combine and sort by date - most recent first (for the Game Details list)
+        return (regularGames + manualGames).sorted { $0.date > $1.date }
     }
     
     var chartData: [(date: Date, individualPL: Double, cumulativePL: Double)] {
-        // Sort by date - chronological order (oldest to newest for the chart)
-        let sortedData = zip(games, playerResults)
+        // Combine regular games and manual entries
+        let regularData = zip(games, playerResults)
             .map { (game, result) in
                 (date: game.endDate, profitLoss: result.profitLoss)
             }
-            .sorted { $0.date < $1.date }
+        
+        let manualData = manualEntries.map { entry in
+            (date: entry.date, profitLoss: entry.profitLoss)
+        }
+        
+        // Sort by date - chronological order (oldest to newest for the chart)
+        let sortedData = (regularData + manualData).sorted { $0.date < $1.date }
         
         // Calculate running total P/L while keeping individual game P/L
         var runningTotal: Double = 0
@@ -276,6 +295,10 @@ struct ProfitLossChart: View {
 
 struct PlayerStatsView: View {
     let playerStats: PlayerStats
+    @ObservedObject var viewModel: PokerGameViewModel
+    @State private var showingAddManualEntry = false
+    @State private var entryToDelete: UUID? = nil
+    @State private var showingDeleteConfirmation = false
     
     // Helper function to format duration
     private func formatDuration(_ seconds: Int?) -> String {
@@ -333,7 +356,7 @@ struct PlayerStatsView: View {
                             Text("Games Played")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text("\(playerStats.games.count)")
+                            Text("\(playerStats.totalGames)")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                         }
@@ -421,46 +444,108 @@ struct PlayerStatsView: View {
                         .padding(.horizontal)
                 }
                 
-                // Game details
+                // Game Details Header
                 Text("Game Details")
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
+                    .padding(.top, 10)
                 
-                ForEach(playerStats.gameHistory.indices, id: \.self) { index in
-                    let historyItem = playerStats.gameHistory[index]
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(historyItem.date.formatted(date: .abbreviated, time: .omitted))
-                            Spacer()
-                            Text(historyItem.profitLoss.formatted(.currency(code: "USD")))
-                                .foregroundColor(historyItem.profitLoss >= 0 ? .green : .red)
-                        }
-                        
-                        if historyItem.duration != nil {
-                            Text("Duration: \(formatDuration(historyItem.duration))")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                // Game details list - embedded non-scrollable List
+                if !playerStats.gameHistory.isEmpty {
+                    List {
+                        ForEach(playerStats.gameHistory.indices, id: \.self) { index in
+                            let historyItem = playerStats.gameHistory[index]
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    if historyItem.isManual {
+                                        Image(systemName: "pencil.circle.fill")
+                                            .foregroundColor(.orange)
+                                            .font(.caption)
+                                    }
+                                    Text(historyItem.date.formatted(date: .abbreviated, time: .omitted))
+                                    Spacer()
+                                    Text(historyItem.profitLoss.formatted(.currency(code: "USD")))
+                                        .foregroundColor(historyItem.profitLoss >= 0 ? .green : .red)
+                                }
+                                
+                                if let duration = historyItem.duration {
+                                    Text("Duration: \(formatDuration(duration))")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                } else if historyItem.isManual {
+                                    Text("Manual Entry")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if historyItem.isManual, let entryId = historyItem.entryId {
+                                    Button(role: .destructive) {
+                                        entryToDelete = entryId
+                                        showingDeleteConfirmation = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                            }
                         }
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 4)
+                    .listStyle(.plain)
+                    .frame(height: CGFloat(playerStats.gameHistory.count) * 60)
+                    .scrollDisabled(true)
                 }
             }
             .padding(.vertical)
         }
         .navigationTitle("Player Stats")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    showingAddManualEntry = true
+                }) {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundColor(.blue)
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddManualEntry) {
+            AddManualGameView(playerName: playerStats.name) { profitLoss, date in
+                viewModel.addManualEntry(playerName: playerStats.name, profitLoss: profitLoss, date: date)
+            }
+        }
+        .confirmationDialog(
+            "Delete Manual Entry?",
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = entryToDelete {
+                    viewModel.deleteManualEntry(id: id)
+                    entryToDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                entryToDelete = nil
+            }
+        } message: {
+            Text("Are you sure you want to delete this manual entry? This action cannot be undone.")
+        }
     }
 }
 
 struct PlayerStatsView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
-            PlayerStatsView(playerStats: PlayerStats(
-                name: "Sample Player",
-                games: [],
-                playerResults: []
-            ))
+            PlayerStatsView(
+                playerStats: PlayerStats(
+                    name: "Sample Player",
+                    games: [],
+                    playerResults: [],
+                    manualEntries: []
+                ),
+                viewModel: PokerGameViewModel()
+            )
         }
     }
 } 

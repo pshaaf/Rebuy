@@ -1,5 +1,20 @@
 import Foundation
 
+// MARK: - Manual Game Entry
+struct ManualGameEntry: Identifiable, Codable {
+    let id: UUID
+    let playerName: String
+    let profitLoss: Double
+    let date: Date
+    
+    init(id: UUID = UUID(), playerName: String, profitLoss: Double, date: Date) {
+        self.id = id
+        self.playerName = playerName
+        self.profitLoss = profitLoss
+        self.date = date
+    }
+}
+
 // MARK: - BuyIn Models
 struct BuyIn: Identifiable, Codable, Equatable {
     let id: UUID

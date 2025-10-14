@@ -62,6 +62,7 @@ class PokerGameViewModel: ObservableObject {
     @Published var buyInText: String = ""
     @Published var showingEndGameAlert = false
     @Published var gameLogs: [GameLog] = []
+    @Published var manualGameEntries: [ManualGameEntry] = []
     @Published var shouldShowLogs = false
     @Published var gameStartTime: Date?
     @Published var isGameActive: Bool = false
@@ -79,6 +80,12 @@ class PokerGameViewModel: ObservableObject {
         if let savedLogs = UserDefaults.standard.data(forKey: "GameLogs"),
            let decodedLogs = try? JSONDecoder().decode([GameLog].self, from: savedLogs) {
             self.gameLogs = decodedLogs
+        }
+        
+        // Load saved manual game entries
+        if let savedEntries = UserDefaults.standard.data(forKey: "ManualGameEntries"),
+           let decodedEntries = try? JSONDecoder().decode([ManualGameEntry].self, from: savedEntries) {
+            self.manualGameEntries = decodedEntries
         }
     }
     
@@ -254,10 +261,14 @@ class PokerGameViewModel: ObservableObject {
             gameLog.players.first { $0.name == playerName }
         }
         
+        // Get all manual entries for this player by name
+        let manualEntriesForPlayer = manualGameEntries.filter { $0.playerName == playerName }
+        
         return PlayerStats(
             name: playerName,
             games: gamesForPlayer,
-            playerResults: playerResults
+            playerResults: playerResults,
+            manualEntries: manualEntriesForPlayer
         )
     }
     
@@ -267,6 +278,24 @@ class PokerGameViewModel: ObservableObject {
         
         // Create a unique set and sort alphabetically
         return Array(Set(allNames)).sorted()
+    }
+    
+    // MARK: - Manual Game Entry Functions
+    func addManualEntry(playerName: String, profitLoss: Double, date: Date) {
+        let entry = ManualGameEntry(playerName: playerName, profitLoss: profitLoss, date: date)
+        manualGameEntries.append(entry)
+        saveManualEntries()
+    }
+    
+    func deleteManualEntry(id: UUID) {
+        manualGameEntries.removeAll { $0.id == id }
+        saveManualEntries()
+    }
+    
+    private func saveManualEntries() {
+        if let encoded = try? JSONEncoder().encode(manualGameEntries) {
+            UserDefaults.standard.set(encoded, forKey: "ManualGameEntries")
+        }
     }
 }
 
@@ -533,13 +562,11 @@ struct BuyInsDisplay: View {
                 }
             }
             
-            // Total invested (bold)
-            if !buyIns.isEmpty {
-                Text("Total: \(totalInvested.formatted(.currency(code: "USD")))")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-            }
+            // Total invested (bold) - always show to maintain consistent row height
+            Text(!buyIns.isEmpty ? "Total: \(totalInvested.formatted(.currency(code: "USD")))" : " ")
+                .font(.caption2)
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
         }
         .frame(width: 200, alignment: .leading)
     }
@@ -659,7 +686,7 @@ struct ContentView: View {
                 // The table - will scroll to show the active text field
                 ScrollViewReader { scrollProxy in
                     ScrollView(.vertical, showsIndicators: true) {
-                        HStack(spacing: 0) {
+                        HStack(alignment: .top, spacing: 0) {
                             // LEFT (Pinned) COLUMN
                             VStack(spacing: 0) {
                                 Text("Player")
