@@ -274,10 +274,27 @@ class PokerGameViewModel: ObservableObject {
     
     func getUniquePlayerNames() -> [String] {
         // Extract all player names from logs
-        let allNames = gameLogs.flatMap { $0.players.map { $0.name } }
+        let logNames = gameLogs.flatMap { $0.players.map { $0.name } }
         
-        // Create a unique set and sort alphabetically
+        // Extract all player names from manual entries
+        let manualNames = manualGameEntries.map { $0.playerName }
+        
+        // Combine and create a unique set, then sort alphabetically
+        let allNames = logNames + manualNames
         return Array(Set(allNames)).sorted()
+    }
+    
+    // Helper function to get a PlayerResult for a given player name
+    // Returns the most recent PlayerResult if multiple exist
+    func getPlayerResult(byName playerName: String) -> PlayerResult? {
+        // Find all games this player participated in
+        let gamesForPlayer = gameLogs.filter { gameLog in
+            gameLog.players.contains { $0.name == playerName }
+        }
+        
+        // Get the most recent result for this player
+        let sortedGames = gamesForPlayer.sorted { $0.endDate > $1.endDate }
+        return sortedGames.first?.players.first { $0.name == playerName }
     }
     
     // MARK: - Manual Game Entry Functions

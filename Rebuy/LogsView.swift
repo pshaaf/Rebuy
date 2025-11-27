@@ -112,7 +112,7 @@ struct LogsView: View {
         }
         .background(
             NavigationLink(
-                destination: selectedPlayer.map { PlayerStatsView(playerStats: viewModel.getPlayerStats(for: $0), viewModel: viewModel) },
+                destination: selectedPlayer.map { PlayerStatsView(player: $0, viewModel: viewModel) },
                 isActive: $isShowingPlayerStats,
                 label: { EmptyView() }
             )

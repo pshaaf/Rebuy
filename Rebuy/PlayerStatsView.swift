@@ -82,9 +82,59 @@ struct PlayerStats {
     }
 }
 
-struct ProfitLossChart: View {
+// Chart dataset structure for multi-player comparison
+struct ChartDataset {
+    let playerName: String
     let data: [(date: Date, individualPL: Double, cumulativePL: Double)]
+    let color: Color
+}
+
+struct ProfitLossChart: View {
+    let datasets: [ChartDataset] // Changed from single data to array of datasets
     @State private var selectedPointIndex: Int? = nil
+    @State private var selectedDatasetIndex: Int? = nil // Track which dataset's point is selected
+    
+    // Backward compatibility: single dataset initializer
+    init(data: [(date: Date, individualPL: Double, cumulativePL: Double)]) {
+        self.datasets = [ChartDataset(playerName: "Player", data: data, color: .blue)]
+    }
+    
+    // New initializer for multiple datasets
+    init(datasets: [ChartDataset]) {
+        self.datasets = datasets
+    }
+    
+    // Get all unique dates across all datasets for X-axis alignment
+    private var allDates: [Date] {
+        let allDatesSet = Set(datasets.flatMap { $0.data.map { $0.date } })
+        return Array(allDatesSet).sorted()
+    }
+    
+    // Get aligned data for a dataset (fills in missing dates with last known value)
+    private func getAlignedData(for dataset: ChartDataset, dates: [Date]) -> [(date: Date, individualPL: Double, cumulativePL: Double)] {
+        var result: [(date: Date, individualPL: Double, cumulativePL: Double)] = []
+        var lastKnownPL: Double = 0
+        
+        for date in dates {
+            // Find the data point for this date, or use the most recent before this date
+            if let exactMatch = dataset.data.first(where: { Calendar.current.isDate($0.date, inSameDayAs: date) }) {
+                result.append(exactMatch)
+                lastKnownPL = exactMatch.cumulativePL
+            } else {
+                // Find the most recent data point before this date
+                let previousPoints = dataset.data.filter { $0.date < date }
+                if let mostRecent = previousPoints.max(by: { $0.date < $1.date }) {
+                    result.append((date: date, individualPL: 0, cumulativePL: mostRecent.cumulativePL))
+                    lastKnownPL = mostRecent.cumulativePL
+                } else {
+                    // No previous data, use zero
+                    result.append((date: date, individualPL: 0, cumulativePL: 0))
+                    lastKnownPL = 0
+                }
+            }
+        }
+        return result
+    }
     
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -100,7 +150,13 @@ struct ProfitLossChart: View {
     
     var body: some View {
         GeometryReader { geometry in
-            if data.count > 1 {
+            let alignedDates = allDates
+            
+            if alignedDates.isEmpty || datasets.isEmpty {
+                Text("No game data available")
+                    .foregroundColor(.gray)
+                    .position(x: geometry.size.width/2, y: geometry.size.height/2)
+            } else if alignedDates.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
                     // Calculate chart area dimensions with proper margins
                     // Add minimal extra space just for tooltip visibility
@@ -112,9 +168,15 @@ struct ProfitLossChart: View {
                     let chartWidth = baseWidth - chartMargin.leading - chartMargin.trailing
                     let chartHeight = geometry.size.height - chartMargin.top - chartMargin.bottom
                     
-                    // Find min and max for scaling (use cumulative P/L for chart scaling)
-                    let maxProfit = data.map { $0.cumulativePL }.max() ?? 0
-                    let minProfit = min(data.map { $0.cumulativePL }.min() ?? 0, 0) // Ensure we include zero
+                    // Get aligned data for all datasets
+                    let alignedDatasets = datasets.map { dataset in
+                        (dataset: dataset, alignedData: getAlignedData(for: dataset, dates: alignedDates))
+                    }
+                    
+                    // Find min and max across ALL datasets for scaling
+                    let allCumulativeValues = alignedDatasets.flatMap { $0.alignedData.map { $0.cumulativePL } }
+                    let maxProfit = allCumulativeValues.max() ?? 0
+                    let minProfit = min(allCumulativeValues.min() ?? 0, 0) // Ensure we include zero
                     let range = max(maxProfit - minProfit, 1.0)
                     
                     // Calculate zero Y position
@@ -143,116 +205,146 @@ struct ProfitLossChart: View {
                         }
                         .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                         
-                        // Date labels
-                        ForEach(0..<data.count, id: \.self) { i in
-                            let xPos = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
+                        // Date labels (use aligned dates)
+                        ForEach(0..<alignedDates.count, id: \.self) { i in
+                            let xPos = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(max(alignedDates.count - 1, 1))))
                             
                             // Date label
-                            Text(dateFormatter.string(from: data[i].date))
+                            Text(dateFormatter.string(from: alignedDates[i]))
                                 .font(.caption)
                                 .foregroundColor(.gray)
                                 .position(x: xPos, y: chartMargin.top + chartHeight + 20)
                         }
                         
-                        // Curved chart line (uses cumulative P/L)
-                        Path { path in
-                            guard data.count > 1 else { return }
+                        // Draw lines for each dataset
+                        ForEach(Array(alignedDatasets.enumerated()), id: \.offset) { datasetIndex, alignedDataset in
+                            let dataset = alignedDataset.dataset
+                            let alignedData = alignedDataset.alignedData
                             
-                            // Convert data points to chart coordinates using cumulative P/L
-                            let points = data.enumerated().map { (index, item) in
-                                let x = chartMargin.leading + (CGFloat(index) * (chartWidth / CGFloat(data.count - 1)))
-                                let y = chartMargin.top + chartHeight * (1 - (item.cumulativePL - minProfit) / range)
-                                return CGPoint(x: x, y: y)
-                            }
-                            
-                            // Start the path
-                            path.move(to: points[0])
-                            
-                            // Create smooth curves between points
-                            for i in 1..<points.count {
-                                let previousPoint = points[i-1]
-                                let currentPoint = points[i]
+                            // Curved chart line (uses cumulative P/L)
+                            Path { path in
+                                guard alignedData.count > 1 else { return }
                                 
-                                // Calculate control points for smooth curve
-                                let controlPoint1 = CGPoint(
-                                    x: previousPoint.x + (currentPoint.x - previousPoint.x) * 0.4,
-                                    y: previousPoint.y
-                                )
-                                let controlPoint2 = CGPoint(
-                                    x: currentPoint.x - (currentPoint.x - previousPoint.x) * 0.4,
-                                    y: currentPoint.y
-                                )
+                                // Convert data points to chart coordinates using cumulative P/L
+                                let points = alignedData.enumerated().map { (index, item) in
+                                    let x = chartMargin.leading + (CGFloat(index) * (chartWidth / CGFloat(max(alignedDates.count - 1, 1))))
+                                    let y = chartMargin.top + chartHeight * (1 - (item.cumulativePL - minProfit) / range)
+                                    return CGPoint(x: x, y: y)
+                                }
                                 
-                                path.addCurve(to: currentPoint, control1: controlPoint1, control2: controlPoint2)
+                                // Start the path
+                                path.move(to: points[0])
+                                
+                                // Create smooth curves between points
+                                for i in 1..<points.count {
+                                    let previousPoint = points[i-1]
+                                    let currentPoint = points[i]
+                                    
+                                    // Calculate control points for smooth curve
+                                    let controlPoint1 = CGPoint(
+                                        x: previousPoint.x + (currentPoint.x - previousPoint.x) * 0.4,
+                                        y: previousPoint.y
+                                    )
+                                    let controlPoint2 = CGPoint(
+                                        x: currentPoint.x - (currentPoint.x - previousPoint.x) * 0.4,
+                                        y: currentPoint.y
+                                    )
+                                    
+                                    path.addCurve(to: currentPoint, control1: controlPoint1, control2: controlPoint2)
+                                }
                             }
-                        }
-                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                        
-                        // Data points (colored by individual game P/L)
-                        ForEach(0..<data.count, id: \.self) { i in
-                            let x = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(data.count - 1)))
-                            let y = chartMargin.top + chartHeight * (1 - (data[i].cumulativePL - minProfit) / range)
+                            .stroke(dataset.color, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
                             
-                            Button(action: {
-                                selectedPointIndex = selectedPointIndex == i ? nil : i
-                            }) {
-                                Circle()
-                                    .fill(data[i].individualPL >= 0 ? Color.green : Color.red)
-                                    .frame(width: selectedPointIndex == i ? 12 : 8, 
-                                           height: selectedPointIndex == i ? 12 : 8)
-                                    .scaleEffect(selectedPointIndex == i ? 1.2 : 1.0)
-                                    .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
+                            // Data points (only show for primary player - first dataset, or when selected)
+                            if datasetIndex == 0 || (selectedDatasetIndex == datasetIndex && selectedPointIndex != nil) {
+                                ForEach(0..<alignedData.count, id: \.self) { i in
+                                    let x = chartMargin.leading + (CGFloat(i) * (chartWidth / CGFloat(max(alignedDates.count - 1, 1))))
+                                    let y = chartMargin.top + chartHeight * (1 - (alignedData[i].cumulativePL - minProfit) / range)
+                                    
+                                    // Only show points for actual games (not interpolated)
+                                    if alignedData[i].individualPL != 0 || i == 0 {
+                                        Button(action: {
+                                            if selectedPointIndex == i && selectedDatasetIndex == datasetIndex {
+                                                selectedPointIndex = nil
+                                                selectedDatasetIndex = nil
+                                            } else {
+                                                selectedPointIndex = i
+                                                selectedDatasetIndex = datasetIndex
+                                            }
+                                        }) {
+                                            Circle()
+                                                .fill(alignedData[i].individualPL >= 0 ? Color.green : Color.red)
+                                                .frame(width: (selectedPointIndex == i && selectedDatasetIndex == datasetIndex) ? 12 : 8,
+                                                       height: (selectedPointIndex == i && selectedDatasetIndex == datasetIndex) ? 12 : 8)
+                                                .scaleEffect((selectedPointIndex == i && selectedDatasetIndex == datasetIndex) ? 1.2 : 1.0)
+                                                .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        .position(x: x, y: y)
+                                    }
+                                }
                             }
-                            .buttonStyle(PlainButtonStyle())
-                            .position(x: x, y: y)
                         }
                         
                         // Tooltip for selected point
-                        if let selectedIndex = selectedPointIndex {
-                            let selectedData = data[selectedIndex]
-                            let x = chartMargin.leading + (CGFloat(selectedIndex) * (chartWidth / CGFloat(data.count - 1)))
-                            let y = chartMargin.top + chartHeight * (1 - (selectedData.cumulativePL - minProfit) / range)
+                        if let selectedIndex = selectedPointIndex, let datasetIndex = selectedDatasetIndex,
+                           datasetIndex < alignedDatasets.count {
+                            let alignedData = alignedDatasets[datasetIndex].alignedData
+                            let dataset = alignedDatasets[datasetIndex].dataset
                             
-                            // Position tooltip above or below point based on available space
-                            let tooltipY = y < geometry.size.height / 2 ? y + 50 : y - 50
-                            
-                            VStack(spacing: 4) {
-                                Text(tooltipDateFormatter.string(from: selectedData.date))
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            if selectedIndex < alignedData.count {
+                                let selectedData = alignedData[selectedIndex]
+                                let x = chartMargin.leading + (CGFloat(selectedIndex) * (chartWidth / CGFloat(max(alignedDates.count - 1, 1))))
+                                let y = chartMargin.top + chartHeight * (1 - (selectedData.cumulativePL - minProfit) / range)
                                 
-                                // Individual game P/L
-                                HStack(spacing: 4) {
-                                    Text("Game:")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(selectedData.individualPL.formatted(.currency(code: "USD")))
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(selectedData.individualPL >= 0 ? .green : .red)
-                                }
+                                // Position tooltip above or below point based on available space
+                                let tooltipY = y < geometry.size.height / 2 ? y + 50 : y - 50
                                 
-                                // Overall P/L at this point
-                                HStack(spacing: 4) {
-                                    Text("Overall:")
+                                VStack(spacing: 4) {
+                                    Text(dataset.playerName)
                                         .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(selectedData.cumulativePL.formatted(.currency(code: "USD")))
-                                        .font(.headline)
                                         .fontWeight(.semibold)
-                                        .foregroundColor(selectedData.cumulativePL >= 0 ? .green : .red)
+                                        .foregroundColor(.primary)
+                                    
+                                    Text(tooltipDateFormatter.string(from: selectedData.date))
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    
+                                    // Individual game P/L
+                                    if selectedData.individualPL != 0 {
+                                        HStack(spacing: 4) {
+                                            Text("Game:")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                            Text(selectedData.individualPL.formatted(.currency(code: "USD")))
+                                                .font(.subheadline)
+                                                .fontWeight(.medium)
+                                                .foregroundColor(selectedData.individualPL >= 0 ? .green : .red)
+                                        }
+                                    }
+                                    
+                                    // Overall P/L at this point
+                                    HStack(spacing: 4) {
+                                        Text("Overall:")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        Text(selectedData.cumulativePL.formatted(.currency(code: "USD")))
+                                            .font(.headline)
+                                            .fontWeight(.semibold)
+                                            .foregroundColor(selectedData.cumulativePL >= 0 ? .green : .red)
+                                    }
                                 }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color(.systemBackground))
+                                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                                )
+                                .position(x: x, y: tooltipY)
+                                .transition(.scale.combined(with: .opacity))
+                                .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(.systemBackground))
-                                    .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
-                            )
-                            .position(x: x, y: tooltipY)
-                            .transition(.scale.combined(with: .opacity))
-                            .animation(.easeInOut(duration: 0.2), value: selectedPointIndex)
                         }
                     }
                     .frame(width: totalWidth, height: geometry.size.height)
@@ -260,45 +352,161 @@ struct ProfitLossChart: View {
                     .onTapGesture {
                         // Tap outside to deselect
                         selectedPointIndex = nil
+                        selectedDatasetIndex = nil
                     }
                 }
-            } else if data.count == 1 {
+                .overlay(alignment: .top) {
+                    // Legend for multiple datasets
+                    if datasets.count > 1 {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 16) {
+                                ForEach(Array(datasets.enumerated()), id: \.offset) { index, dataset in
+                                    HStack(spacing: 6) {
+                                        Circle()
+                                            .fill(dataset.color)
+                                            .frame(width: 12, height: 12)
+                                        Text(dataset.playerName)
+                                            .font(.caption)
+                                            .foregroundColor(.primary)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                        }
+                        .frame(height: 30)
+                        .background(Color(.systemBackground).opacity(0.9))
+                        .cornerRadius(8)
+                        .padding(.top, 8)
+                    }
+                }
+            } else if alignedDates.count == 1 {
                 // For a single data point
                 VStack(spacing: 10) {
                     Text("Only one game played")
                         .foregroundColor(.gray)
                         .font(.caption)
                     
-                    HStack(spacing: 5) {
-                        Text(dateFormatter.string(from: data[0].date))
-                            .font(.caption)
-                        
-                        Circle()
-                            .fill(data[0].individualPL >= 0 ? Color.green : Color.red)
-                            .frame(width: 10, height: 10)
-                        
-                        Text(data[0].cumulativePL.formatted(.currency(code: "USD")))
-                            .font(.caption)
-                            .foregroundColor(data[0].cumulativePL >= 0 ? .green : .red)
+                    ForEach(Array(datasets.enumerated()), id: \.offset) { index, dataset in
+                        if let firstData = dataset.data.first {
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(dataset.color)
+                                    .frame(width: 10, height: 10)
+                                
+                                Text(dataset.playerName)
+                                    .font(.caption)
+                                
+                                Text(dateFormatter.string(from: firstData.date))
+                                    .font(.caption)
+                                
+                                Text(firstData.cumulativePL.formatted(.currency(code: "USD")))
+                                    .font(.caption)
+                                    .foregroundColor(firstData.cumulativePL >= 0 ? .green : .red)
+                            }
+                        }
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .position(x: geometry.size.width/2, y: geometry.size.height/2)
-            } else {
-                Text("No game data available")
-                    .foregroundColor(.gray)
-                    .position(x: geometry.size.width/2, y: geometry.size.height/2)
             }
         }
     }
 }
 
+// Player comparison selection view
+struct PlayerComparisonSelectionView: View {
+    @Environment(\.dismiss) var dismiss
+    let currentPlayerName: String
+    @Binding var selectedPlayers: Set<String>
+    let availablePlayers: [String]
+    
+    var body: some View {
+        NavigationView {
+            List {
+                if availablePlayers.isEmpty {
+                    Text("No other players available for comparison")
+                        .foregroundColor(.gray)
+                        .font(.caption)
+                } else {
+                    ForEach(availablePlayers, id: \.self) { playerName in
+                        Button(action: {
+                            if selectedPlayers.contains(playerName) {
+                                selectedPlayers.remove(playerName)
+                            } else {
+                                selectedPlayers.insert(playerName)
+                            }
+                        }) {
+                            HStack {
+                                Text(playerName)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                if selectedPlayers.contains(playerName) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Compare Players")
+            .navigationBarItems(
+                leading: Button("Cancel") {
+                    dismiss()
+                },
+                trailing: Button("Done") {
+                    dismiss()
+                }
+            )
+        }
+    }
+}
+
 struct PlayerStatsView: View {
-    let playerStats: PlayerStats
+    let player: PlayerResult
     @ObservedObject var viewModel: PokerGameViewModel
     @State private var showingAddManualEntry = false
     @State private var entryToDelete: UUID? = nil
     @State private var showingDeleteConfirmation = false
+    @State private var selectedComparisonPlayers: Set<String> = []
+    @State private var showingPlayerComparison = false
+    
+    // Computed property that dynamically fetches stats from viewModel
+    // This ensures the view updates when manualGameEntries changes
+    var playerStats: PlayerStats {
+        viewModel.getPlayerStats(for: player)
+    }
+    
+    // Color palette for comparison players
+    private let comparisonColors: [Color] = [.orange, .green, .purple, .red, .teal, .pink, .indigo, .mint]
+    
+    // Computed property to create chart datasets including comparison players
+    private var chartDatasets: [ChartDataset] {
+        var datasets: [ChartDataset] = []
+        
+        // Add primary player (always first, in blue)
+        datasets.append(ChartDataset(
+            playerName: playerStats.name,
+            data: playerStats.chartData,
+            color: .blue
+        ))
+        
+        // Add comparison players
+        for (index, playerName) in selectedComparisonPlayers.sorted().enumerated() {
+            if let comparisonPlayer = viewModel.getPlayerResult(byName: playerName) {
+                let comparisonStats = viewModel.getPlayerStats(for: comparisonPlayer)
+                let colorIndex = index % comparisonColors.count
+                datasets.append(ChartDataset(
+                    playerName: playerName,
+                    data: comparisonStats.chartData,
+                    color: comparisonColors[colorIndex]
+                ))
+            }
+        }
+        
+        return datasets
+    }
     
     // Helper function to format duration
     private func formatDuration(_ seconds: Int?) -> String {
@@ -429,13 +637,32 @@ struct PlayerStatsView: View {
                 
                 // Line graph
                 if !playerStats.gameHistory.isEmpty {
-                    Text("Performance History")
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                    HStack {
+                        Text("Performance History")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            showingPlayerComparison = true
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "person.2.fill")
+                                Text(selectedComparisonPlayers.isEmpty ? "Compare" : "\(selectedComparisonPlayers.count)")
+                            }
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(.horizontal)
                     
-                    ProfitLossChart(data: playerStats.chartData)
-                        .frame(height: 200)
+                    ProfitLossChart(datasets: chartDatasets)
+                        .frame(height: 350)
                         .padding()
                 } else {
                     Text("No game history available")
@@ -514,6 +741,13 @@ struct PlayerStatsView: View {
                 viewModel.addManualEntry(playerName: playerStats.name, profitLoss: profitLoss, date: date)
             }
         }
+        .sheet(isPresented: $showingPlayerComparison) {
+            PlayerComparisonSelectionView(
+                currentPlayerName: playerStats.name,
+                selectedPlayers: $selectedComparisonPlayers,
+                availablePlayers: viewModel.getUniquePlayerNames().filter { $0 != playerStats.name }
+            )
+        }
         .confirmationDialog(
             "Delete Manual Entry?",
             isPresented: $showingDeleteConfirmation,
@@ -538,11 +772,11 @@ struct PlayerStatsView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationView {
             PlayerStatsView(
-                playerStats: PlayerStats(
+                player: PlayerResult(
                     name: "Sample Player",
-                    games: [],
-                    playerResults: [],
-                    manualEntries: []
+                    buyIns: [],
+                    finalChipCount: 0,
+                    venmoStatus: false
                 ),
                 viewModel: PokerGameViewModel()
             )
