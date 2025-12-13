@@ -414,63 +414,12 @@ struct ProfitLossChart: View {
     }
 }
 
-// Player comparison selection view
-struct PlayerComparisonSelectionView: View {
-    @Environment(\.dismiss) var dismiss
-    let currentPlayerName: String
-    @Binding var selectedPlayers: Set<String>
-    let availablePlayers: [String]
-    
-    var body: some View {
-        NavigationView {
-            List {
-                if availablePlayers.isEmpty {
-                    Text("No other players available for comparison")
-                        .foregroundColor(.gray)
-                        .font(.caption)
-                } else {
-                    ForEach(availablePlayers, id: \.self) { playerName in
-                        Button(action: {
-                            if selectedPlayers.contains(playerName) {
-                                selectedPlayers.remove(playerName)
-                            } else {
-                                selectedPlayers.insert(playerName)
-                            }
-                        }) {
-                            HStack {
-                                Text(playerName)
-                                    .foregroundColor(.primary)
-                                Spacer()
-                                if selectedPlayers.contains(playerName) {
-                                    Image(systemName: "checkmark")
-                                        .foregroundColor(.blue)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Compare Players")
-            .navigationBarItems(
-                leading: Button("Cancel") {
-                    dismiss()
-                },
-                trailing: Button("Done") {
-                    dismiss()
-                }
-            )
-        }
-    }
-}
-
 struct PlayerStatsView: View {
     let player: PlayerResult
     @ObservedObject var viewModel: PokerGameViewModel
     @State private var showingAddManualEntry = false
     @State private var entryToDelete: UUID? = nil
     @State private var showingDeleteConfirmation = false
-    @State private var selectedComparisonPlayers: Set<String> = []
-    @State private var showingPlayerComparison = false
     
     // Computed property that dynamically fetches stats from viewModel
     // This ensures the view updates when manualGameEntries changes
@@ -478,34 +427,9 @@ struct PlayerStatsView: View {
         viewModel.getPlayerStats(for: player)
     }
     
-    // Color palette for comparison players
-    private let comparisonColors: [Color] = [.orange, .green, .purple, .red, .teal, .pink, .indigo, .mint]
-    
-    // Computed property to create chart datasets including comparison players
-    private var chartDatasets: [ChartDataset] {
-        var datasets: [ChartDataset] = []
-        
-        // Add primary player (always first, in blue)
-        datasets.append(ChartDataset(
-            playerName: playerStats.name,
-            data: playerStats.chartData,
-            color: .blue
-        ))
-        
-        // Add comparison players
-        for (index, playerName) in selectedComparisonPlayers.sorted().enumerated() {
-            if let comparisonPlayer = viewModel.getPlayerResult(byName: playerName) {
-                let comparisonStats = viewModel.getPlayerStats(for: comparisonPlayer)
-                let colorIndex = index % comparisonColors.count
-                datasets.append(ChartDataset(
-                    playerName: playerName,
-                    data: comparisonStats.chartData,
-                    color: comparisonColors[colorIndex]
-                ))
-            }
-        }
-        
-        return datasets
+    // Chart data for the player
+    private var chartData: [(date: Date, individualPL: Double, cumulativePL: Double)] {
+        playerStats.chartData
     }
     
     // Helper function to format duration
@@ -637,31 +561,12 @@ struct PlayerStatsView: View {
                 
                 // Line graph
                 if !playerStats.gameHistory.isEmpty {
-                    HStack {
-                        Text("Performance History")
-                            .font(.headline)
-                            .multilineTextAlignment(.center)
-                        
-                        Spacer()
-                        
-                        Button(action: {
-                            showingPlayerComparison = true
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "person.2.fill")
-                                Text(selectedComparisonPlayers.isEmpty ? "Compare" : "\(selectedComparisonPlayers.count)")
-                            }
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(8)
-                        }
-                    }
-                    .padding(.horizontal)
+                    Text("Performance History")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                     
-                    ProfitLossChart(datasets: chartDatasets)
+                    ProfitLossChart(data: chartData)
                         .frame(height: 350)
                         .padding()
                 } else {
@@ -740,13 +645,6 @@ struct PlayerStatsView: View {
             AddManualGameView(playerName: playerStats.name) { profitLoss, date in
                 viewModel.addManualEntry(playerName: playerStats.name, profitLoss: profitLoss, date: date)
             }
-        }
-        .sheet(isPresented: $showingPlayerComparison) {
-            PlayerComparisonSelectionView(
-                currentPlayerName: playerStats.name,
-                selectedPlayers: $selectedComparisonPlayers,
-                availablePlayers: viewModel.getUniquePlayerNames().filter { $0 != playerStats.name }
-            )
         }
         .confirmationDialog(
             "Delete Manual Entry?",

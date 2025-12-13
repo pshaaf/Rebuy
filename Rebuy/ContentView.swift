@@ -4,6 +4,8 @@ import SwiftUI
 struct Constants {
     static let venmoBlue = Color(red: 0.067, green: 0.482, blue: 0.847)
     static let cardRed = Color(red: 0.698, green: 0.132, blue: 0.132)
+    static let tableRowHeight: CGFloat = 70 // Fixed height for table rows to ensure alignment
+    static let buyInChipsAreaHeight: CGFloat = 40 // Maximum height for buy-in chips area
 }
 
 // Keyboard toolbar view
@@ -284,19 +286,6 @@ class PokerGameViewModel: ObservableObject {
         return Array(Set(allNames)).sorted()
     }
     
-    // Helper function to get a PlayerResult for a given player name
-    // Returns the most recent PlayerResult if multiple exist
-    func getPlayerResult(byName playerName: String) -> PlayerResult? {
-        // Find all games this player participated in
-        let gamesForPlayer = gameLogs.filter { gameLog in
-            gameLog.players.contains { $0.name == playerName }
-        }
-        
-        // Get the most recent result for this player
-        let sortedGames = gamesForPlayer.sorted { $0.endDate > $1.endDate }
-        return sortedGames.first?.players.first { $0.name == playerName }
-    }
-    
     // MARK: - Manual Game Entry Functions
     func addManualEntry(playerName: String, profitLoss: Double, date: Date) {
         let entry = ManualGameEntry(playerName: playerName, profitLoss: profitLoss, date: date)
@@ -550,7 +539,7 @@ struct BuyInsDisplay: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
                 // Horizontal scrollable buy-in chips
                 if !buyIns.isEmpty {
@@ -563,12 +552,12 @@ struct BuyInsDisplay: View {
                             }
                         }
                     }
-                    .frame(maxWidth: 180)
+                    .frame(maxWidth: 180, maxHeight: Constants.buyInChipsAreaHeight)
                 } else {
                     Text("No buy-ins")
                         .font(.caption)
                         .foregroundColor(.gray)
-                        .frame(width: 80)
+                        .frame(width: 80, height: Constants.buyInChipsAreaHeight)
                 }
                 
                 // Add button
@@ -578,6 +567,7 @@ struct BuyInsDisplay: View {
                         .font(.title3)
                 }
             }
+            .frame(height: Constants.buyInChipsAreaHeight)
             
             // Total invested (bold) - always show to maintain consistent row height
             Text(!buyIns.isEmpty ? "Total: \(totalInvested.formatted(.currency(code: "USD")))" : " ")
@@ -585,7 +575,7 @@ struct BuyInsDisplay: View {
                 .fontWeight(.bold)
                 .foregroundColor(.primary)
         }
-        .frame(width: 200, alignment: .leading)
+        .frame(width: 200, height: Constants.tableRowHeight, alignment: .leading)
     }
 }
 
@@ -636,7 +626,9 @@ struct ContentView: View {
                     // Timer section
                     if !keyboardVisible {
                         HStack(spacing: 12) {
+                            // Start Game button
                             if !viewModel.isGameActive {
+                                Spacer()
                                 Button(action: {
                                     viewModel.startGame()
                                 }) {
@@ -650,19 +642,43 @@ struct ContentView: View {
                                     .background(Color.green)
                                     .cornerRadius(8)
                                 }
-                            } else {
-                                HStack {
-                                    Image(systemName: "timer")
-                                        .foregroundColor(.blue)
-                                    Text(viewModel.formattedElapsedTime)
-                                        .font(.headline)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.blue)
+                                Spacer()
+                            }
+                            
+                            // Timer and Stop Game button group (when game is active)
+                            if viewModel.isGameActive {
+                                Spacer()
+                                HStack(spacing: 12) {
+                                    // Timer display
+                                    HStack {
+                                        Image(systemName: "timer")
+                                            .foregroundColor(.blue)
+                                        Text(viewModel.formattedElapsedTime)
+                                            .font(.headline)
+                                            .fontWeight(.bold)
+                                            .foregroundColor(.blue)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(Color.blue.opacity(0.1))
+                                    .cornerRadius(8)
+                                    
+                                    // Stop Game button
+                                    Button(action: {
+                                        viewModel.showingEndGameAlert = true
+                                    }) {
+                                        HStack {
+                                            Image(systemName: "stop.circle.fill")
+                                            Text("Stop Game")
+                                        }
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(Color.red)
+                                        .cornerRadius(8)
+                                    }
                                 }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(Color.blue.opacity(0.1))
-                                .cornerRadius(8)
+                                Spacer()
                             }
                         }
                         .padding(.bottom, 8)
@@ -708,8 +724,9 @@ struct ContentView: View {
                             VStack(spacing: 0) {
                                 Text("Player")
                                     .font(.headline)
-                                    .frame(width: 100, alignment: .leading)
-                                    .padding(.vertical, 8)
+                                    .frame(width: 100, height: Constants.tableRowHeight, alignment: .leading)
+                                    .padding(.top, 2)
+                                    .padding(.bottom, 0)
                                 
                                 ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, _ in
                                     PlayerNameInput(
@@ -722,8 +739,8 @@ struct ContentView: View {
                                             }
                                         }
                                     )
-                                    .frame(width: 100, alignment: .leading)
-                                    .padding(.vertical, 8)
+                                    .frame(width: 100, height: Constants.tableRowHeight, alignment: .leading)
+                                    .padding(.vertical, 2)
                                     .id("player-\(index)")
                                 }
                             }
@@ -749,7 +766,9 @@ struct ContentView: View {
                                             .font(.headline)
                                             .frame(width: 40, alignment: .center)
                                     }
-                                    .padding(.vertical, 8)
+                                    .frame(height: Constants.tableRowHeight)
+                                    .padding(.top, 2)
+                                    .padding(.bottom, 0)
                                     
                                     ForEach(Array(viewModel.players.enumerated()), id: \.element.id) { index, p in
                                         HStack(spacing: 0) {
@@ -787,7 +806,8 @@ struct ContentView: View {
                                             }
                                             .frame(width: 40, alignment: .center)
                                         }
-                                        .padding(.vertical, 8)
+                                        .frame(height: Constants.tableRowHeight)
+                                        .padding(.vertical, 2)
                                     }
                                 }
                             }
@@ -817,15 +837,6 @@ struct ContentView: View {
                             Spacer()
                             
                             Button(action: {
-                                viewModel.showingEndGameAlert = true
-                            }) {
-                                Text("End & Save")
-                                    .foregroundColor(.blue)
-                            }
-                            
-                            Spacer()
-                            
-                            Button(action: {
                                 showingResetAlert = true
                             }) {
                                 Text("Reset Game")
@@ -840,6 +851,14 @@ struct ContentView: View {
                     }
                 }
             }
+            .overlay(
+                Group {
+                    if viewModel.isGameActive {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.red, lineWidth: 4)
+                    }
+                }
+            )
             .navigationBarItems(trailing:
                 NavigationLink(
                     destination: LogsView(viewModel: viewModel),
