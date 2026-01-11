@@ -43,12 +43,20 @@ struct Checkbox: View {
     }
 }
 
-struct Player: Identifiable, Equatable {
-    let id = UUID()
+struct Player: Identifiable, Equatable, Codable {
+    let id: UUID
     var name: String
     var buyIns: [BuyIn]
     var venmoStatus: Bool
     var chipCount: Double
+    
+    init(id: UUID = UUID(), name: String, buyIns: [BuyIn], venmoStatus: Bool, chipCount: Double) {
+        self.id = id
+        self.name = name
+        self.buyIns = buyIns
+        self.venmoStatus = venmoStatus
+        self.chipCount = chipCount
+    }
     
     var totalInvested: Double {
         return buyIns.reduce(0) { $0 + $1.amount }
@@ -71,6 +79,7 @@ class PokerGameViewModel: ObservableObject {
     @Published var currentTime: Date = Date() // For timer updates
     
     init() {
+        // Default players (will be overwritten if saved game exists)
         self.players = [
             Player(name: "Player 1", buyIns: [], venmoStatus: false, chipCount: 0),
             Player(name: "Player 2", buyIns: [], venmoStatus: false, chipCount: 0),
@@ -89,6 +98,9 @@ class PokerGameViewModel: ObservableObject {
            let decodedEntries = try? JSONDecoder().decode([ManualGameEntry].self, from: savedEntries) {
             self.manualGameEntries = decodedEntries
         }
+        
+        // Restore active game state (overwrites defaults if saved game exists)
+        loadActiveGame()
     }
     
     var totalInPlay: Double {
@@ -120,6 +132,7 @@ class PokerGameViewModel: ObservableObject {
     func startGame() {
         gameStartTime = Date()
         isGameActive = true
+        saveActiveGame()
     }
     
     func stopGame() {
@@ -191,6 +204,7 @@ class PokerGameViewModel: ObservableObject {
                     players[index].buyIns.append(initialBuyIn)
                 }
             }
+            saveActiveGame()
         }
     }
     
@@ -201,11 +215,13 @@ class PokerGameViewModel: ObservableObject {
         let type: BuyInType = players[playerIndex].buyIns.isEmpty ? .initial : .rebuy
         let newBuyIn = BuyIn(amount: amount, type: type)
         players[playerIndex].buyIns.append(newBuyIn)
+        saveActiveGame()
     }
     
     func removeBuyIn(for playerIndex: Int, buyInId: UUID) {
         guard playerIndex < players.count else { return }
         players[playerIndex].buyIns.removeAll { $0.id == buyInId }
+        saveActiveGame()
     }
     
     func addPlayer() {
@@ -220,6 +236,7 @@ class PokerGameViewModel: ObservableObject {
             chipCount: 0
         )
         players.append(newPlayer)
+        saveActiveGame()
     }
     
     func endAndSaveGame() {
@@ -227,7 +244,7 @@ class PokerGameViewModel: ObservableObject {
         let newLog = createGameLog()
         gameLogs.append(newLog)
         saveGameLogs()
-        resetGame()
+        resetGame()  // This already calls clearActiveGame()
         shouldShowLogs = true
     }
     
@@ -241,11 +258,13 @@ class PokerGameViewModel: ObservableObject {
             Player(name: "Player 3", buyIns: [], venmoStatus: false, chipCount: 0),
             Player(name: "Player 4", buyIns: [], venmoStatus: false, chipCount: 0)
         ]
+        clearActiveGame()
     }
     
     func removePlayer(_ player: Player) {
         if let index = players.firstIndex(of: player) {
             players.remove(at: index)
+            saveActiveGame()
         }
     }
     
@@ -302,6 +321,36 @@ class PokerGameViewModel: ObservableObject {
         if let encoded = try? JSONEncoder().encode(manualGameEntries) {
             UserDefaults.standard.set(encoded, forKey: "ManualGameEntries")
         }
+    }
+    
+    // MARK: - Active Game Persistence
+    private static let activeGameKey = "ActiveGame"
+    
+    private func saveActiveGame() {
+        let activeGame = ActiveGame(
+            players: players,
+            buyInText: buyInText,
+            gameStartTime: gameStartTime,
+            isGameActive: isGameActive
+        )
+        if let encoded = try? JSONEncoder().encode(activeGame) {
+            UserDefaults.standard.set(encoded, forKey: Self.activeGameKey)
+        }
+    }
+    
+    private func loadActiveGame() {
+        guard let data = UserDefaults.standard.data(forKey: Self.activeGameKey),
+              let activeGame = try? JSONDecoder().decode(ActiveGame.self, from: data) else {
+            return
+        }
+        self.players = activeGame.players
+        self.buyInText = activeGame.buyInText
+        self.gameStartTime = activeGame.gameStartTime
+        self.isGameActive = activeGame.isGameActive
+    }
+    
+    private func clearActiveGame() {
+        UserDefaults.standard.removeObject(forKey: Self.activeGameKey)
     }
 }
 
@@ -851,14 +900,6 @@ struct ContentView: View {
                     }
                 }
             }
-            .overlay(
-                Group {
-                    if viewModel.isGameActive {
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.red, lineWidth: 4)
-                    }
-                }
-            )
             .navigationBarItems(trailing:
                 NavigationLink(
                     destination: LogsView(viewModel: viewModel),

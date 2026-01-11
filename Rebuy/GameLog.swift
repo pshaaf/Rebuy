@@ -1,5 +1,13 @@
 import Foundation
 
+// MARK: - Active Game State (for persistence)
+struct ActiveGame: Codable {
+    let players: [Player]
+    let buyInText: String
+    let gameStartTime: Date?
+    let isGameActive: Bool
+}
+
 // MARK: - Manual Game Entry
 struct ManualGameEntry: Identifiable, Codable {
     let id: UUID

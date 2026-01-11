@@ -1,5 +1,31 @@
 import SwiftUI
 
+// MARK: - Date Range Filter
+enum DateRangeFilter: String, CaseIterable {
+    case all = "ALL"
+    case ytd = "YTD"
+    case oneYear = "1Y"
+    case mtd = "MTD"
+    
+    var startDate: Date? {
+        let calendar = Calendar.current
+        let now = Date()
+        switch self {
+        case .all:
+            return nil
+        case .ytd:
+            return calendar.date(from: calendar.dateComponents([.year], from: now))
+        case .oneYear:
+            return calendar.date(byAdding: .year, value: -1, to: now)
+        case .mtd:
+            return calendar.date(from: DateComponents(
+                year: calendar.component(.year, from: now),
+                month: calendar.component(.month, from: now)
+            ))
+        }
+    }
+}
+
 struct PlayerStats {
     let name: String
     let games: [GameLog]
@@ -420,6 +446,7 @@ struct PlayerStatsView: View {
     @State private var showingAddManualEntry = false
     @State private var entryToDelete: UUID? = nil
     @State private var showingDeleteConfirmation = false
+    @State private var selectedDateRange: DateRangeFilter = .all
     
     // Computed property that dynamically fetches stats from viewModel
     // This ensures the view updates when manualGameEntries changes
@@ -430,6 +457,31 @@ struct PlayerStatsView: View {
     // Chart data for the player
     private var chartData: [(date: Date, individualPL: Double, cumulativePL: Double)] {
         playerStats.chartData
+    }
+    
+    // Filtered game history based on selected date range
+    private var filteredGameHistory: [(date: Date, profitLoss: Double, duration: Int?, isManual: Bool, entryId: UUID?)] {
+        guard let startDate = selectedDateRange.startDate else {
+            return playerStats.gameHistory
+        }
+        return playerStats.gameHistory.filter { $0.date >= startDate }
+    }
+    
+    // Filtered chart data based on selected date range (recalculates cumulative totals)
+    private var filteredChartData: [(date: Date, individualPL: Double, cumulativePL: Double)] {
+        guard let startDate = selectedDateRange.startDate else {
+            return playerStats.chartData
+        }
+        
+        // Filter to only include data points within the date range
+        let filteredData = playerStats.chartData.filter { $0.date >= startDate }
+        
+        // Recalculate cumulative totals starting from zero for the filtered range
+        var runningTotal: Double = 0
+        return filteredData.map { item in
+            runningTotal += item.individualPL
+            return (date: item.date, individualPL: item.individualPL, cumulativePL: runningTotal)
+        }
     }
     
     // Helper function to format duration
@@ -561,12 +613,24 @@ struct PlayerStatsView: View {
                 
                 // Line graph
                 if !playerStats.gameHistory.isEmpty {
-                    Text("Performance History")
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                    HStack {
+                        Text("Performance History")
+                            .font(.headline)
+                        Spacer()
+                        HStack(spacing: 16) {
+                            ForEach(DateRangeFilter.allCases, id: \.self) { filter in
+                                Button(filter.rawValue) {
+                                    selectedDateRange = filter
+                                }
+                                .font(.subheadline)
+                                .fontWeight(selectedDateRange == filter ? .bold : .regular)
+                                .foregroundColor(selectedDateRange == filter ? .blue : .gray)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
                     
-                    ProfitLossChart(data: chartData)
+                    ProfitLossChart(data: filteredChartData)
                         .frame(height: 350)
                         .padding()
                 } else {
@@ -584,10 +648,10 @@ struct PlayerStatsView: View {
                     .padding(.top, 10)
                 
                 // Game details list - embedded non-scrollable List
-                if !playerStats.gameHistory.isEmpty {
+                if !filteredGameHistory.isEmpty {
                     List {
-                        ForEach(playerStats.gameHistory.indices, id: \.self) { index in
-                            let historyItem = playerStats.gameHistory[index]
+                        ForEach(filteredGameHistory.indices, id: \.self) { index in
+                            let historyItem = filteredGameHistory[index]
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     if historyItem.isManual {
@@ -624,7 +688,7 @@ struct PlayerStatsView: View {
                         }
                     }
                     .listStyle(.plain)
-                    .frame(height: CGFloat(playerStats.gameHistory.count) * 60)
+                    .frame(height: CGFloat(filteredGameHistory.count) * 60)
                     .scrollDisabled(true)
                 }
             }
