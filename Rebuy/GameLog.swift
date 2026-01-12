@@ -23,6 +23,49 @@ struct ManualGameEntry: Identifiable, Codable {
     }
 }
 
+// MARK: - Imported Game Entry
+struct ImportedGameEntry: Identifiable, Codable {
+    let id: UUID
+    let playerName: String
+    let profitLoss: Double
+    let date: Date
+    let sourceFile: String?
+    let importDate: Date
+    
+    init(id: UUID = UUID(), playerName: String, profitLoss: Double, date: Date,
+         sourceFile: String? = nil, importDate: Date = Date()) {
+        self.id = id
+        self.playerName = playerName
+        self.profitLoss = profitLoss
+        self.date = date
+        self.sourceFile = sourceFile
+        self.importDate = importDate
+    }
+}
+
+// MARK: - Export Models
+struct PlayerExport: Codable {
+    let playerName: String
+    let exportDate: Date
+    let appVersion: String
+    let games: [GameExport]
+}
+
+struct GameExport: Codable {
+    let date: Date
+    let profitLoss: Double
+    let totalBuyIn: Double
+    let duration: Int?
+    let isManual: Bool
+    let isImported: Bool
+    let buyIns: [BuyInExport]
+}
+
+struct BuyInExport: Codable {
+    let amount: Double
+    let type: String
+}
+
 // MARK: - BuyIn Models
 struct BuyIn: Identifiable, Codable, Equatable {
     let id: UUID

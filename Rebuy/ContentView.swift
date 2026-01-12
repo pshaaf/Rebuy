@@ -73,6 +73,7 @@ class PokerGameViewModel: ObservableObject {
     @Published var showingEndGameAlert = false
     @Published var gameLogs: [GameLog] = []
     @Published var manualGameEntries: [ManualGameEntry] = []
+    @Published var importedGameEntries: [ImportedGameEntry] = []
     @Published var shouldShowLogs = false
     @Published var gameStartTime: Date?
     @Published var isGameActive: Bool = false
@@ -97,6 +98,12 @@ class PokerGameViewModel: ObservableObject {
         if let savedEntries = UserDefaults.standard.data(forKey: "ManualGameEntries"),
            let decodedEntries = try? JSONDecoder().decode([ManualGameEntry].self, from: savedEntries) {
             self.manualGameEntries = decodedEntries
+        }
+        
+        // Load saved imported game entries
+        if let savedImports = UserDefaults.standard.data(forKey: "ImportedGameEntries"),
+           let decodedImports = try? JSONDecoder().decode([ImportedGameEntry].self, from: savedImports) {
+            self.importedGameEntries = decodedImports
         }
         
         // Restore active game state (overwrites defaults if saved game exists)
@@ -285,11 +292,15 @@ class PokerGameViewModel: ObservableObject {
         // Get all manual entries for this player by name
         let manualEntriesForPlayer = manualGameEntries.filter { $0.playerName == playerName }
         
+        // Get all imported entries for this player by name
+        let importedEntriesForPlayer = importedGameEntries.filter { $0.playerName == playerName }
+        
         return PlayerStats(
             name: playerName,
             games: gamesForPlayer,
             playerResults: playerResults,
-            manualEntries: manualEntriesForPlayer
+            manualEntries: manualEntriesForPlayer,
+            importedEntries: importedEntriesForPlayer
         )
     }
     
@@ -300,8 +311,11 @@ class PokerGameViewModel: ObservableObject {
         // Extract all player names from manual entries
         let manualNames = manualGameEntries.map { $0.playerName }
         
+        // Extract all player names from imported entries
+        let importedNames = importedGameEntries.map { $0.playerName }
+        
         // Combine and create a unique set, then sort alphabetically
-        let allNames = logNames + manualNames
+        let allNames = logNames + manualNames + importedNames
         return Array(Set(allNames)).sorted()
     }
     
@@ -320,6 +334,12 @@ class PokerGameViewModel: ObservableObject {
     private func saveManualEntries() {
         if let encoded = try? JSONEncoder().encode(manualGameEntries) {
             UserDefaults.standard.set(encoded, forKey: "ManualGameEntries")
+        }
+    }
+    
+    private func saveImportedEntries() {
+        if let encoded = try? JSONEncoder().encode(importedGameEntries) {
+            UserDefaults.standard.set(encoded, forKey: "ImportedGameEntries")
         }
     }
     
@@ -351,6 +371,168 @@ class PokerGameViewModel: ObservableObject {
     
     private func clearActiveGame() {
         UserDefaults.standard.removeObject(forKey: Self.activeGameKey)
+    }
+    
+    // MARK: - Export/Import Functions
+    
+    func createPlayerExport(for playerName: String) -> PlayerExport {
+        // Get all regular games for this player
+        let playerGames = gameLogs.compactMap { gameLog -> GameExport? in
+            guard let playerResult = gameLog.players.first(where: { $0.name == playerName }) else {
+                return nil
+            }
+            
+            let buyInExports = playerResult.buyIns.map { buyIn in
+                BuyInExport(amount: buyIn.amount, type: buyIn.type.rawValue)
+            }
+            
+            return GameExport(
+                date: gameLog.endDate,
+                profitLoss: playerResult.profitLoss,
+                totalBuyIn: playerResult.totalBuyIn,
+                duration: gameLog.duration,
+                isManual: false,
+                isImported: false,
+                buyIns: buyInExports
+            )
+        }
+        
+        // Get all manual entries for this player
+        let manualGames = manualGameEntries
+            .filter { $0.playerName == playerName }
+            .map { entry in
+                GameExport(
+                    date: entry.date,
+                    profitLoss: entry.profitLoss,
+                    totalBuyIn: 0,
+                    duration: nil,
+                    isManual: true,
+                    isImported: false,
+                    buyIns: []
+                )
+            }
+        
+        // Get all imported entries for this player
+        let importedGames = importedGameEntries
+            .filter { $0.playerName == playerName }
+            .map { entry in
+                GameExport(
+                    date: entry.date,
+                    profitLoss: entry.profitLoss,
+                    totalBuyIn: 0,
+                    duration: nil,
+                    isManual: false,
+                    isImported: true,
+                    buyIns: []
+                )
+            }
+        
+        // Combine and sort by date
+        let allGames = (playerGames + manualGames + importedGames).sorted { $0.date < $1.date }
+        
+        return PlayerExport(
+            playerName: playerName,
+            exportDate: Date(),
+            appVersion: "1.0",
+            games: allGames
+        )
+    }
+    
+    func createExportFileURL(for playerName: String) -> URL? {
+        let export = createPlayerExport(for: playerName)
+        
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = .prettyPrinted
+        
+        guard let jsonData = try? encoder.encode(export) else {
+            return nil
+        }
+        
+        // Create a safe filename
+        let safePlayerName = playerName.replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "/", with: "-")
+        let fileName = "\(safePlayerName)_history.json"
+        
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        do {
+            try jsonData.write(to: tempURL)
+            return tempURL
+        } catch {
+            return nil
+        }
+    }
+    
+    func importPlayerHistory(from url: URL) throws {
+        // Start accessing the security-scoped resource
+        guard url.startAccessingSecurityScopedResource() else {
+            throw NSError(domain: "ImportError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot access file"])
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+        
+        let data = try Data(contentsOf: url)
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        let playerExport = try decoder.decode(PlayerExport.self, from: data)
+        
+        // Get existing dates for this player to avoid duplicates
+        let existingDates = Set(
+            importedGameEntries
+                .filter { $0.playerName == playerExport.playerName }
+                .map { Calendar.current.startOfDay(for: $0.date) }
+        )
+        
+        // Create ImportedGameEntry for each game (skip duplicates by date)
+        let sourceFileName = url.lastPathComponent
+        
+        for game in playerExport.games {
+            let gameDay = Calendar.current.startOfDay(for: game.date)
+            
+            // Skip if we already have an entry for this date
+            if existingDates.contains(gameDay) {
+                continue
+            }
+            
+            let importedEntry = ImportedGameEntry(
+                playerName: playerExport.playerName,
+                profitLoss: game.profitLoss,
+                date: game.date,
+                sourceFile: sourceFileName,
+                importDate: Date()
+            )
+            
+            importedGameEntries.append(importedEntry)
+        }
+        
+        saveImportedEntries()
+        
+        // Create a blank GameLog so the player appears in Game History
+        let blankPlayerResult = PlayerResult(
+            name: playerExport.playerName,
+            buyIns: [],
+            finalChipCount: 0,
+            venmoStatus: false
+        )
+        
+        let blankGameLog = GameLog(
+            endDate: Date(),
+            duration: nil,
+            location: "Imported",
+            players: [blankPlayerResult],
+            totalBuyIn: 0,
+            totalChipCount: 0
+        )
+        
+        gameLogs.append(blankGameLog)
+        saveGameLogs()
+    }
+    
+    func deleteImportedEntry(id: UUID) {
+        importedGameEntries.removeAll { $0.id == id }
+        saveImportedEntries()
     }
 }
 

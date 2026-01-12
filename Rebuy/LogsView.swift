@@ -1,9 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LogsView: View {
     @ObservedObject var viewModel: PokerGameViewModel
     @State private var selectedPlayer: PlayerResult?
     @State private var isShowingPlayerStats = false
+    @State private var showingImporter = false
+    @State private var importError: String?
+    @State private var showingImportError = false
     
     // Computed property to sort logs by date
     private var sortedLogs: [GameLog] {
@@ -108,7 +112,45 @@ struct LogsView: View {
         }
         .navigationTitle("Game History")
         .toolbar {
-            EditButton()
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
+                    showingImporter = true
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.arrow.down")
+                        Text("Import")
+                    }
+                    .font(.subheadline)
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                EditButton()
+            }
+        }
+        .fileImporter(
+            isPresented: $showingImporter,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    do {
+                        try viewModel.importPlayerHistory(from: url)
+                    } catch {
+                        importError = error.localizedDescription
+                        showingImportError = true
+                    }
+                }
+            case .failure(let error):
+                importError = error.localizedDescription
+                showingImportError = true
+            }
+        }
+        .alert("Import Error", isPresented: $showingImportError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(importError ?? "Unknown error occurred")
         }
         .background(
             NavigationLink(

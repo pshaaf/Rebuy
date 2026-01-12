@@ -31,15 +31,17 @@ struct PlayerStats {
     let games: [GameLog]
     let playerResults: [PlayerResult]
     let manualEntries: [ManualGameEntry]
+    let importedEntries: [ImportedGameEntry]
     
     var totalProfitLoss: Double {
         let regularPL = playerResults.reduce(0) { $0 + $1.profitLoss }
         let manualPL = manualEntries.reduce(0) { $0 + $1.profitLoss }
-        return regularPL + manualPL
+        let importedPL = importedEntries.reduce(0) { $0 + $1.profitLoss }
+        return regularPL + manualPL + importedPL
     }
     
     var totalGames: Int {
-        return games.count + manualEntries.count
+        return games.count + manualEntries.count + importedEntries.count
     }
     
     var averageGameDuration: Int? {
@@ -70,23 +72,27 @@ struct PlayerStats {
         playerResults.reduce(0) { $0 + $1.totalBuyIn }
     }
     
-    var gameHistory: [(date: Date, profitLoss: Double, duration: Int?, isManual: Bool, entryId: UUID?)] {
-        // Combine regular games and manual entries
+    var gameHistory: [(date: Date, profitLoss: Double, duration: Int?, isManual: Bool, isImported: Bool, entryId: UUID?)] {
+        // Combine regular games, manual entries, and imported entries
         let regularGames = zip(games, playerResults)
             .map { (game, result) in
-                (date: game.endDate, profitLoss: result.profitLoss, duration: game.duration, isManual: false, entryId: nil as UUID?)
+                (date: game.endDate, profitLoss: result.profitLoss, duration: game.duration, isManual: false, isImported: false, entryId: nil as UUID?)
             }
         
         let manualGames = manualEntries.map { entry in
-            (date: entry.date, profitLoss: entry.profitLoss, duration: nil as Int?, isManual: true, entryId: entry.id as UUID?)
+            (date: entry.date, profitLoss: entry.profitLoss, duration: nil as Int?, isManual: true, isImported: false, entryId: entry.id as UUID?)
+        }
+        
+        let importedGames = importedEntries.map { entry in
+            (date: entry.date, profitLoss: entry.profitLoss, duration: nil as Int?, isManual: false, isImported: true, entryId: entry.id as UUID?)
         }
         
         // Combine and sort by date - most recent first (for the Game Details list)
-        return (regularGames + manualGames).sorted { $0.date > $1.date }
+        return (regularGames + manualGames + importedGames).sorted { $0.date > $1.date }
     }
     
     var chartData: [(date: Date, individualPL: Double, cumulativePL: Double)] {
-        // Combine regular games and manual entries
+        // Combine regular games, manual entries, and imported entries
         let regularData = zip(games, playerResults)
             .map { (game, result) in
                 (date: game.endDate, profitLoss: result.profitLoss)
@@ -96,8 +102,12 @@ struct PlayerStats {
             (date: entry.date, profitLoss: entry.profitLoss)
         }
         
+        let importedData = importedEntries.map { entry in
+            (date: entry.date, profitLoss: entry.profitLoss)
+        }
+        
         // Sort by date - chronological order (oldest to newest for the chart)
-        let sortedData = (regularData + manualData).sorted { $0.date < $1.date }
+        let sortedData = (regularData + manualData + importedData).sorted { $0.date < $1.date }
         
         // Calculate running total P/L while keeping individual game P/L
         var runningTotal: Double = 0
@@ -445,8 +455,14 @@ struct PlayerStatsView: View {
     @ObservedObject var viewModel: PokerGameViewModel
     @State private var showingAddManualEntry = false
     @State private var entryToDelete: UUID? = nil
+    @State private var isDeletedEntryImported = false
     @State private var showingDeleteConfirmation = false
     @State private var selectedDateRange: DateRangeFilter = .all
+    
+    // Export file URL for sharing
+    private var exportFileURL: URL? {
+        viewModel.createExportFileURL(for: player.name)
+    }
     
     // Computed property that dynamically fetches stats from viewModel
     // This ensures the view updates when manualGameEntries changes
@@ -460,7 +476,7 @@ struct PlayerStatsView: View {
     }
     
     // Filtered game history based on selected date range
-    private var filteredGameHistory: [(date: Date, profitLoss: Double, duration: Int?, isManual: Bool, entryId: UUID?)] {
+    private var filteredGameHistory: [(date: Date, profitLoss: Double, duration: Int?, isManual: Bool, isImported: Bool, entryId: UUID?)] {
         guard let startDate = selectedDateRange.startDate else {
             return playerStats.gameHistory
         }
@@ -654,7 +670,11 @@ struct PlayerStatsView: View {
                             let historyItem = filteredGameHistory[index]
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
-                                    if historyItem.isManual {
+                                    if historyItem.isImported {
+                                        Image(systemName: "square.and.arrow.down.fill")
+                                            .foregroundColor(.purple)
+                                            .font(.caption)
+                                    } else if historyItem.isManual {
                                         Image(systemName: "pencil.circle.fill")
                                             .foregroundColor(.orange)
                                             .font(.caption)
@@ -669,6 +689,10 @@ struct PlayerStatsView: View {
                                     Text("Duration: \(formatDuration(duration))")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
+                                } else if historyItem.isImported {
+                                    Text("Imported Entry")
+                                        .font(.caption)
+                                        .foregroundColor(.purple)
                                 } else if historyItem.isManual {
                                     Text("Manual Entry")
                                         .font(.caption)
@@ -676,9 +700,18 @@ struct PlayerStatsView: View {
                                 }
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if historyItem.isManual, let entryId = historyItem.entryId {
+                                if historyItem.isImported, let entryId = historyItem.entryId {
                                     Button(role: .destructive) {
                                         entryToDelete = entryId
+                                        isDeletedEntryImported = true
+                                        showingDeleteConfirmation = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                } else if historyItem.isManual, let entryId = historyItem.entryId {
+                                    Button(role: .destructive) {
+                                        entryToDelete = entryId
+                                        isDeletedEntryImported = false
                                         showingDeleteConfirmation = true
                                     } label: {
                                         Label("Delete", systemImage: "trash")
@@ -697,11 +730,22 @@ struct PlayerStatsView: View {
         .navigationTitle("Player Stats")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    showingAddManualEntry = true
-                }) {
-                    Image(systemName: "plus.circle.fill")
-                        .foregroundColor(.blue)
+                HStack(spacing: 16) {
+                    // Export button
+                    if let url = exportFileURL {
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    
+                    // Add manual entry button
+                    Button(action: {
+                        showingAddManualEntry = true
+                    }) {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundColor(.blue)
+                    }
                 }
             }
         }
@@ -711,13 +755,17 @@ struct PlayerStatsView: View {
             }
         }
         .confirmationDialog(
-            "Delete Manual Entry?",
+            isDeletedEntryImported ? "Delete Imported Entry?" : "Delete Manual Entry?",
             isPresented: $showingDeleteConfirmation,
             titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) {
                 if let id = entryToDelete {
-                    viewModel.deleteManualEntry(id: id)
+                    if isDeletedEntryImported {
+                        viewModel.deleteImportedEntry(id: id)
+                    } else {
+                        viewModel.deleteManualEntry(id: id)
+                    }
                     entryToDelete = nil
                 }
             }
@@ -725,7 +773,9 @@ struct PlayerStatsView: View {
                 entryToDelete = nil
             }
         } message: {
-            Text("Are you sure you want to delete this manual entry? This action cannot be undone.")
+            Text(isDeletedEntryImported
+                 ? "Are you sure you want to delete this imported entry? This action cannot be undone."
+                 : "Are you sure you want to delete this manual entry? This action cannot be undone.")
         }
     }
 }
